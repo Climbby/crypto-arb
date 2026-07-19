@@ -130,4 +130,18 @@ async def backfill_equity_from_trades(
             recorded_at=ts,
         )
         written += 1
+
+    # Drop cash-only seed / understated early snapshots that predate warm books
+    await db.conn.execute(
+        """
+        DELETE FROM paper_equity
+        WHERE note = 'seed'
+           OR (
+             COALESCE(note, '') NOT LIKE 'backfill%'
+             AND equity_usdt < ?
+           )
+        """,
+        (mtm_baseline * 0.7,),
+    )
+    await db.conn.commit()
     return written
