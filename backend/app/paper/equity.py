@@ -60,7 +60,9 @@ async def backfill_equity_from_trades(
     realized PnL so the chart covers trading that happened before equity
     snapshots existed.
     """
-    if await db.has_backfill_equity():
+    px = mid_prices_usdt(ticks)
+    # Wait until major books are present so baseline isn't understated
+    if not all(k in px for k in ("BTC", "ETH", "SOL")):
         return 0
 
     trades = await db.list_trades(limit=5000)
@@ -72,13 +74,30 @@ async def backfill_equity_from_trades(
     if not first_at:
         return 0
 
-    earliest = await db.earliest_equity_at()
-    if earliest and earliest <= first_at:
-        return 0
-
     equity_now, cash_now = mark_equity_usdt(by_venue, ticks)
     mtm_baseline = equity_now - float(realized_pnl_usdt)
     cash_baseline = cash_now - float(realized_pnl_usdt)
+
+    if await db.has_backfill_equity():
+        # Replace a bad early backfill (ran before price books were warm)
+        cur = await db.conn.execute(
+            """
+            SELECT equity_usdt FROM paper_equity
+            WHERE note = 'backfill:start'
+            ORDER BY id ASC LIMIT 1
+            """
+        )
+        row = await cur.fetchone()
+        if row is not None:
+            start_eq = float(row["equity_usdt"])
+            if abs(start_eq - mtm_baseline) < 50.0:
+                return 0
+        await db.conn.execute("DELETE FROM paper_equity WHERE note LIKE 'backfill%'")
+        await db.conn.commit()
+    else:
+        earliest = await db.earliest_equity_at()
+        if earliest and earliest <= first_at:
+            return 0
 
     try:
         start_dt = datetime.fromisoformat(first_at.replace("Z", "+00:00")) - timedelta(seconds=1)

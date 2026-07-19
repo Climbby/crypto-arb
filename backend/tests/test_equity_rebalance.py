@@ -46,9 +46,7 @@ async def test_backfill_from_trades(broker: PaperBroker):
         detected_at=utcnow(),
     )
     await broker.execute(opp, notional_usdt=5.0, fee_map={"binance": 0.0, "kraken": 0.0})
-    # Clear live equity so earliest is after trades conceptually — wipe and leave empty
     await broker.db.clear_equity()
-    # Re-seed a late snapshot only
     await broker.db.record_equity(
         equity_usdt=10_050.0,
         realized_pnl_usdt=5.0,
@@ -56,7 +54,11 @@ async def test_backfill_from_trades(broker: PaperBroker):
         note="late",
         recorded_at="2099-01-01T00:00:00+00:00",
     )
-    ticks = [Tick(exchange="binance", symbol="BTC/USDT", bid=100.0, ask=100.0)]
+    ticks = [
+        Tick(exchange="binance", symbol="BTC/USDT", bid=100.0, ask=100.0),
+        Tick(exchange="binance", symbol="ETH/USDT", bid=2000.0, ask=2000.0),
+        Tick(exchange="binance", symbol="SOL/USDT", bid=100.0, ask=100.0),
+    ]
     portfolio = await broker.portfolio()
     written = await backfill_equity_from_trades(
         broker.db,
@@ -69,7 +71,6 @@ async def test_backfill_from_trades(broker: PaperBroker):
     notes = [r["note"] for r in rows]
     assert "backfill:start" in notes
     assert "backfill:trade" in notes
-    # Chronological: backfill before late snapshot
     assert rows[0]["note"].startswith("backfill")
 
 

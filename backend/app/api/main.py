@@ -160,9 +160,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     async def maybe_backfill_equity(ticks: list) -> None:
-        if backfill_state["done"]:
-            return
-        backfill_state["done"] = True
         portfolio = await broker.portfolio()
         written = await backfill_equity_from_trades(
             db,
@@ -172,6 +169,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         if written:
             logger.info("Backfilled %s equity points from paper trades", written)
+            backfill_state["done"] = True
+        elif backfill_state["done"] is False:
+            # Keep trying until majors are priced / backfill settles
+            px = {t.symbol for t in ticks}
+            if {"BTC/USDT", "ETH/USDT", "SOL/USDT"} <= px:
+                # Majors present but nothing to write — stop retrying
+                backfill_state["done"] = True
 
     async def on_prices_updated() -> None:
         ticks = await store.snapshot()
