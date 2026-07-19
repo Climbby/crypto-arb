@@ -149,6 +149,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     async def snapshot_equity(ticks: list, note: str | None = None) -> dict[str, Any] | None:
+        from app.paper.equity import mid_prices_usdt
+
+        px = mid_prices_usdt(ticks)
+        if not all(k in px for k in ("BTC", "ETH", "SOL")):
+            return None
         portfolio = await broker.portfolio()
         by_venue = portfolio.get("by_venue", {})
         equity, cash = mark_equity_usdt(by_venue, ticks)

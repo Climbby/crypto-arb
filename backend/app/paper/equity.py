@@ -148,6 +148,6 @@ async def _purge_understated_equity(db: Database, mtm_baseline: float) -> None:
              AND equity_usdt < ?
            )
         """,
-        (mtm_baseline * 0.7,),
+        (mtm_baseline * 0.9,),
     )
     await db.conn.commit()
