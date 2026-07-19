@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
     poll_interval_seconds: float = 1.0
+    feed_emit_ms: float = 150.0
+    use_websocket_feeds: bool = True
+    enable_triangular: bool = True
     min_net_edge_pct: float = 0.05
     slippage_bps: float = 5.0  # 5 bps = 0.05% per leg estimate
     watched_symbols: str = "BTC/USDT,ETH/USDT,SOL/USDT"

@@ -17,8 +17,10 @@ from pydantic import BaseModel, Field
 
 from app.config import Settings, get_settings
 from app.db.database import Database
+from app.engine.inventory import annotate_inventory
 from app.engine.spread import SpreadEngine
-from app.feeds.poller import PricePoller, TickStore
+from app.engine.triangular import triangular_symbols
+from app.feeds.poller import PriceFeed, TickStore
 from app.paper.broker import PaperBroker, PaperBrokerError
 
 logging.basicConfig(level=logging.INFO)
@@ -74,7 +76,6 @@ class ConnectionManager:
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
-    # Resolve DB path relative to backend/ (…/backend/app/api/main.py → parents[2])
     backend_root = Path(__file__).resolve().parents[2]
     db_path = settings.db_path
     if not Path(db_path).is_absolute():
@@ -93,58 +94,75 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         starting_usdt=settings.paper_starting_usdt,
     )
     manager = ConnectionManager()
+
+    cross_symbols = list(settings.symbol_list)
+    feed_symbols = sorted(set(cross_symbols) | set(triangular_symbols()))
+
     state: dict[str, Any] = {
         "settings": settings,
-        "symbols": list(settings.symbol_list),
+        "symbols": cross_symbols,
+        "feed_symbols": feed_symbols,
         "last_opps": [],
         "scan_count": 0,
+        "feed_modes": {},
     }
-    poller_holder: dict[str, PricePoller | None] = {"poller": None}
+    feed_holder: dict[str, PriceFeed | None] = {"feed": None}
     persist_lock = asyncio.Lock()
+
+    async def annotate(opps: list) -> list:
+        portfolio = await broker.portfolio()
+        return annotate_inventory(opps, portfolio.get("by_venue", {}), engine.fee_map)
 
     async def on_prices_updated() -> None:
         ticks = await store.snapshot()
-        opps = engine.scan(ticks, state["symbols"])
+        opps = engine.scan(
+            ticks,
+            state["symbols"],
+            include_triangular=settings.enable_triangular,
+        )
+        opps = await annotate(opps)
         state["last_opps"] = opps
         state["scan_count"] = int(state["scan_count"]) + 1
+        feed = feed_holder["feed"]
+        if feed:
+            state["feed_modes"] = feed.modes
         await manager.broadcast(
             {
                 "type": "opportunities",
                 "opportunities": [o.to_dict() for o in opps],
                 "prices": [t.to_dict() for t in ticks],
                 "scan_count": state["scan_count"],
+                "feed_modes": state["feed_modes"],
             }
         )
-        # Persist theoretical opportunities every scan (24/7 diary)
         if opps and settings.persist_every_scan:
             async with persist_lock:
                 await db.record_opportunities(opps)
                 if state["scan_count"] % 100 == 0:
-                    pruned = await db.prune_opportunities(keep=5000)
+                    pruned = await db.prune_opportunities(keep=8000)
                     if pruned:
                         logger.info("Pruned %s old opportunity snapshots", pruned)
-        elif opps and state["scan_count"] % 5 == 0:
-            async with persist_lock:
-                await db.record_opportunities(opps)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         await db.connect()
         await broker.ensure_seeded()
-        poller = PricePoller(
+        feed = PriceFeed(
             exchanges=settings.exchange_list,
-            symbols=state["symbols"],
+            symbols=state["feed_symbols"],
             store=store,
             interval=settings.poll_interval_seconds,
+            emit_ms=settings.feed_emit_ms,
             on_update=on_prices_updated,
+            use_ws=settings.use_websocket_feeds,
         )
-        poller_holder["poller"] = poller
-        await poller.start()
+        feed_holder["feed"] = feed
+        await feed.start()
         yield
-        await poller.stop()
+        await feed.stop()
         await db.close()
 
-    app = FastAPI(title="Crypto Arb Scanner", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="Crypto Arb Scanner", version="0.2.0", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -155,26 +173,39 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/health")
     async def health() -> dict[str, Any]:
-        return {"ok": True, "scan_count": state["scan_count"]}
+        return {
+            "ok": True,
+            "scan_count": state["scan_count"],
+            "feed_modes": state["feed_modes"],
+            "triangular": settings.enable_triangular,
+        }
 
     @app.get("/prices")
     async def get_prices() -> dict[str, Any]:
         ticks = await store.snapshot()
-        return {"prices": [t.to_dict() for t in ticks]}
+        return {"prices": [t.to_dict() for t in ticks], "feed_modes": state["feed_modes"]}
 
     @app.get("/opportunities")
     async def get_opportunities() -> dict[str, Any]:
-        opps = engine.current
+        opps = await annotate(engine.current)
         return {
             "opportunities": [o.to_dict() for o in opps],
             "theoretical": True,
-            "note": "Edges are theoretical after fees/slippage; ignore latency and depth.",
+            "note": "Edges are theoretical after fees/slippage; inventory flags are paper-only.",
         }
 
     @app.get("/opportunities/history")
     async def opportunity_history(limit: int = 100) -> dict[str, Any]:
         rows = await db.recent_opportunities(limit=min(limit, 500))
         return {"history": rows}
+
+    @app.get("/stats")
+    async def stats(hours: int = 24) -> dict[str, Any]:
+        return await db.opportunity_stats(hours=min(max(hours, 1), 168))
+
+    @app.get("/stats/week")
+    async def stats_week(start: str, end: str) -> dict[str, Any]:
+        return await db.weekly_summary(start_iso=start, end_iso=end)
 
     @app.get("/settings")
     async def get_app_settings() -> dict[str, Any]:
@@ -187,11 +218,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "exchanges": s.exchange_list,
             "paper_starting_usdt": broker.starting_usdt,
             "poll_interval_seconds": s.poll_interval_seconds,
+            "feed_emit_ms": s.feed_emit_ms,
+            "use_websocket_feeds": s.use_websocket_feeds,
+            "enable_triangular": s.enable_triangular,
+            "feed_modes": state["feed_modes"],
         }
 
     @app.patch("/settings")
     async def patch_settings(body: SettingsUpdate) -> dict[str, Any]:
-        s: Settings = state["settings"]
         fee_map = dict(engine.fee_map)
         if body.fee_binance is not None:
             fee_map["binance"] = body.fee_binance
@@ -206,9 +240,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         if body.watched_symbols is not None:
             state["symbols"] = body.watched_symbols
-            poller = poller_holder["poller"]
-            if poller:
-                poller.symbols = body.watched_symbols
+            state["feed_symbols"] = sorted(set(body.watched_symbols) | set(triangular_symbols()))
+            feed = feed_holder["feed"]
+            if feed:
+                feed.symbols = state["feed_symbols"]
         if body.paper_starting_usdt is not None:
             broker.starting_usdt = body.paper_starting_usdt
         await db.set_setting(
@@ -221,7 +256,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "paper_starting_usdt": broker.starting_usdt,
             },
         )
-        # Re-scan with new thresholds
         await on_prices_updated()
         return await get_app_settings()
 
@@ -238,6 +272,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         opp = engine.get(body.opportunity_id)
         if opp is None:
             raise HTTPException(status_code=404, detail="Opportunity not found or expired")
+        if opp.kind == "triangular":
+            raise HTTPException(
+                status_code=400,
+                detail="Triangular paper exec not wired yet — use cross-exchange opportunities",
+            )
         try:
             result = await broker.execute(opp, body.notional_usdt, engine.fee_map)
         except PaperBrokerError as exc:
@@ -260,9 +299,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.websocket("/ws/opportunities")
     async def ws_opportunities(ws: WebSocket) -> None:
         await manager.connect(ws)
-        # Send current snapshot immediately
         ticks = await store.snapshot()
-        opps = engine.current
+        opps = await annotate(engine.current)
         await ws.send_text(
             json.dumps(
                 {
@@ -270,17 +308,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "opportunities": [o.to_dict() for o in opps],
                     "prices": [t.to_dict() for t in ticks],
                     "scan_count": state["scan_count"],
+                    "feed_modes": state["feed_modes"],
                 }
             )
         )
         try:
             while True:
-                # Keep alive; client messages ignored
                 await ws.receive_text()
         except WebSocketDisconnect:
             manager.disconnect(ws)
 
-    # Production: serve built Vite SPA from the same process
     dist = Path(settings.frontend_dist) if settings.frontend_dist else (
         backend_root.parent / "frontend" / "dist"
     )
@@ -295,13 +332,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         @app.get("/{full_path:path}")
         async def spa_fallback(full_path: str) -> FileResponse:
-            # Never steal API / WS paths if a client hits GET on them
             blocked = (
                 "health",
                 "prices",
                 "opportunities",
                 "settings",
                 "paper",
+                "stats",
                 "ws",
                 "docs",
                 "openapi.json",

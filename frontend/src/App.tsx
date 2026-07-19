@@ -11,7 +11,8 @@ import { useOpportunities } from './hooks/useOpportunities'
 const EXCHANGES = ['binance', 'kraken', 'coinbase']
 
 export default function App() {
-  const { opportunities, prices, scanCount, connected, lastUpdateAt } = useOpportunities()
+  const { opportunities, prices, scanCount, connected, lastUpdateAt, feedModes } =
+    useOpportunities()
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null)
   const [historyKey, setHistoryKey] = useState(0)
 
@@ -43,7 +44,12 @@ export default function App() {
           exchanges={EXCHANGES}
           onChange={refreshPaper}
         />
-        <PricesAndHistory prices={prices} refreshKey={historyKey} lastUpdateAt={lastUpdateAt} />
+        <PricesAndHistory
+          prices={prices}
+          refreshKey={historyKey}
+          lastUpdateAt={lastUpdateAt}
+          feedModes={feedModes}
+        />
         <SettingsPanel onSaved={refreshPaper} />
       </main>
 

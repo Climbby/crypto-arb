@@ -145,6 +145,90 @@ class Database:
         await self.conn.commit()
         return delete_count
 
+    async def opportunity_stats(self, hours: int = 24) -> dict[str, Any]:
+        """Aggregate opportunity diary for charts / LifeOS weekly digest."""
+        from datetime import timedelta
+
+        cutoff = (utcnow() - timedelta(hours=hours)).isoformat()
+        cur = await self.conn.execute(
+            """
+            SELECT
+              COUNT(*) AS count,
+              COALESCE(AVG(net_edge_pct), 0) AS avg_net,
+              COALESCE(MAX(net_edge_pct), 0) AS max_net,
+              COALESCE(MIN(net_edge_pct), 0) AS min_net
+            FROM opportunity_snapshots
+            WHERE recorded_at >= ?
+            """,
+            (cutoff,),
+        )
+        row = await cur.fetchone()
+        cur2 = await self.conn.execute(
+            """
+            SELECT
+              substr(recorded_at, 1, 13) || ':00:00' AS bucket,
+              COUNT(*) AS count,
+              AVG(net_edge_pct) AS avg_net,
+              MAX(net_edge_pct) AS max_net
+            FROM opportunity_snapshots
+            WHERE recorded_at >= ?
+            GROUP BY bucket
+            ORDER BY bucket ASC
+            """,
+            (cutoff,),
+        )
+        buckets = [dict(r) for r in await cur2.fetchall()]
+        cur3 = await self.conn.execute(
+            """
+            SELECT symbol, buy_exchange, sell_exchange, net_edge_pct, recorded_at
+            FROM opportunity_snapshots
+            WHERE recorded_at >= ?
+            ORDER BY net_edge_pct DESC
+            LIMIT 5
+            """,
+            (cutoff,),
+        )
+        top = [dict(r) for r in await cur3.fetchall()]
+        return {
+            "hours": hours,
+            "count": int(row["count"]) if row else 0,
+            "avg_net_edge_pct": float(row["avg_net"]) if row else 0.0,
+            "max_net_edge_pct": float(row["max_net"]) if row else 0.0,
+            "min_net_edge_pct": float(row["min_net"]) if row else 0.0,
+            "buckets": buckets,
+            "top": top,
+        }
+
+    async def weekly_summary(self, start_iso: str, end_iso: str) -> dict[str, Any]:
+        cur = await self.conn.execute(
+            """
+            SELECT
+              COUNT(*) AS count,
+              COALESCE(AVG(net_edge_pct), 0) AS avg_net,
+              COALESCE(MAX(net_edge_pct), 0) AS max_net
+            FROM opportunity_snapshots
+            WHERE recorded_at >= ? AND recorded_at < ?
+            """,
+            (start_iso, end_iso),
+        )
+        row = await cur.fetchone()
+        trades = await self.list_trades(limit=500)
+        week_trades = [
+            t
+            for t in trades
+            if start_iso <= str(t.get("executed_at", "")) < end_iso
+        ]
+        pnl = sum(float(t["pnl_usdt"]) for t in week_trades)
+        return {
+            "start": start_iso,
+            "end": end_iso,
+            "opportunity_count": int(row["count"]) if row else 0,
+            "avg_net_edge_pct": float(row["avg_net"]) if row else 0.0,
+            "max_net_edge_pct": float(row["max_net"]) if row else 0.0,
+            "paper_trades": len(week_trades),
+            "paper_pnl_usdt": pnl,
+        }
+
 
     async def get_balances(self) -> list[dict[str, Any]]:
         cur = await self.conn.execute(

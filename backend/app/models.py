@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 
 def utcnow() -> datetime:
@@ -50,6 +50,11 @@ class Opportunity:
     sell_fee_pct: float
     slippage_pct: float
     detected_at: datetime = field(default_factory=utcnow)
+    kind: Literal["cross", "triangular"] = "cross"
+    path: str | None = None
+    executable: bool = True
+    max_notional_usdt: float | None = None
+    inventory_note: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -66,4 +71,9 @@ class Opportunity:
             "slippage_pct": self.slippage_pct,
             "detected_at": self.detected_at.isoformat(),
             "theoretical": True,
+            "kind": self.kind,
+            "path": self.path,
+            "executable": self.executable,
+            "max_notional_usdt": self.max_notional_usdt,
+            "inventory_note": self.inventory_note,
         }

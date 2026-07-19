@@ -22,6 +22,27 @@ export type Opportunity = {
   slippage_pct: number
   detected_at: string
   theoretical: boolean
+  kind?: 'cross' | 'triangular'
+  path?: string | null
+  executable?: boolean
+  max_notional_usdt?: number | null
+  inventory_note?: string | null
+}
+
+export type Stats = {
+  hours: number
+  count: number
+  avg_net_edge_pct: number
+  max_net_edge_pct: number
+  min_net_edge_pct: number
+  buckets: { bucket: string; count: number; avg_net: number; max_net: number }[]
+  top: {
+    symbol: string
+    buy_exchange: string
+    sell_exchange: string
+    net_edge_pct: number
+    recorded_at: string
+  }[]
 }
 
 export type PaperTrade = {
@@ -107,6 +128,7 @@ export const api = {
   getPrices: () => request<{ prices: Tick[] }>('/prices'),
   getHistory: (limit = 80) =>
     request<{ history: HistoryRow[] }>(`/opportunities/history?limit=${limit}`),
+  getStats: (hours = 24) => request<Stats>(`/stats?hours=${hours}`),
   getSettings: () => request<AppSettings>('/settings'),
   patchSettings: (body: Partial<{
     min_net_edge_pct: number

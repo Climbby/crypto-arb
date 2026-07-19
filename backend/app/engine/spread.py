@@ -99,6 +99,7 @@ def find_opportunities(
                 sell_fee_pct=sell_fee_pct,
                 slippage_pct=slip_pct,
                 detected_at=now,
+                kind="cross",
             )
         )
 
@@ -131,9 +132,17 @@ class SpreadEngine:
         if min_net_edge_pct is not None:
             self.min_net_edge_pct = min_net_edge_pct
 
-    def scan(self, all_ticks: list[Tick], symbols: list[str]) -> list[Opportunity]:
+    def scan(
+        self,
+        all_ticks: list[Tick],
+        symbols: list[str],
+        include_triangular: bool = True,
+    ) -> list[Opportunity]:
+        from app.engine.triangular import find_triangular_opportunities
+
         found: list[Opportunity] = []
-        for symbol in symbols:
+        cross_symbols = [s for s in symbols if s.endswith("/USDT") or s.endswith("/USD")]
+        for symbol in cross_symbols:
             ticks = [t for t in all_ticks if t.symbol == symbol]
             if len(ticks) < 2:
                 continue
@@ -142,6 +151,13 @@ class SpreadEngine:
                     ticks, self.fee_map, self.slippage_bps, self.min_net_edge_pct
                 )
             )
+        if include_triangular:
+            found.extend(
+                find_triangular_opportunities(
+                    all_ticks, self.fee_map, self.slippage_bps, self.min_net_edge_pct
+                )
+            )
+        found.sort(key=lambda o: o.net_edge_pct, reverse=True)
         self._current = {o.id: o for o in found}
         return found
 

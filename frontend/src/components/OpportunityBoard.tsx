@@ -14,8 +14,13 @@ export function OpportunityBoard({ opportunities, onExecuted }: Props) {
   const [busyId, setBusyId] = useState<string | null>(null)
   const [notional, setNotional] = useState(100)
   const [error, setError] = useState<string | null>(null)
+  const [showBlocked, setShowBlocked] = useState(true)
 
   async function execute(opp: Opportunity) {
+    if (opp.kind === 'triangular') {
+      setError('Triangular paper exec is not wired yet — cross-exchange only.')
+      return
+    }
     setBusyId(opp.id)
     setError(null)
     try {
@@ -28,26 +33,40 @@ export function OpportunityBoard({ opportunities, onExecuted }: Props) {
     }
   }
 
+  const rows = showBlocked
+    ? opportunities
+    : opportunities.filter((o) => o.executable !== false)
+
   return (
     <section className="rounded-lg border border-[var(--border)] bg-[var(--bg-panel)]/80 p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="m-0 text-lg font-medium">Opportunities</h2>
           <p className="m-0 mt-1 text-xs text-[var(--muted)]">
-            Theoretical · net edge after taker fees + slippage
+            Cross-exchange + triangular · inventory-aware paper flags
           </p>
         </div>
-        <label className="flex items-center gap-2 text-sm text-[var(--muted)]">
-          Paper notional (USDT)
-          <input
-            type="number"
-            min={1}
-            step={10}
-            value={notional}
-            onChange={(e) => setNotional(Number(e.target.value))}
-            className="w-24 rounded border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-[var(--text)]"
-          />
-        </label>
+        <div className="flex flex-wrap items-center gap-3 text-sm text-[var(--muted)]">
+          <label className="flex items-center gap-1.5">
+            <input
+              type="checkbox"
+              checked={showBlocked}
+              onChange={(e) => setShowBlocked(e.target.checked)}
+            />
+            show blocked
+          </label>
+          <label className="flex items-center gap-2">
+            Paper notional (USDT)
+            <input
+              type="number"
+              min={1}
+              step={10}
+              value={notional}
+              onChange={(e) => setNotional(Number(e.target.value))}
+              className="w-24 rounded border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-[var(--text)]"
+            />
+          </label>
+        </div>
       </div>
 
       {error && (
@@ -57,59 +76,73 @@ export function OpportunityBoard({ opportunities, onExecuted }: Props) {
       )}
 
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[720px] border-collapse text-left text-sm">
+        <table className="w-full min-w-[860px] border-collapse text-left text-sm">
           <thead>
             <tr className="border-b border-[var(--border)] text-[var(--muted)]">
-              <th className="py-2 font-medium">Pair</th>
-              <th className="py-2 font-medium">Buy</th>
-              <th className="py-2 font-medium">Sell</th>
-              <th className="py-2 font-medium">Raw %</th>
+              <th className="py-2 font-medium">Kind</th>
+              <th className="py-2 font-medium">Pair / path</th>
+              <th className="py-2 font-medium">Route</th>
               <th className="py-2 font-medium">Net %</th>
-              <th className="py-2 font-medium">Fees</th>
+              <th className="py-2 font-medium">Inventory</th>
               <th className="py-2 font-medium">Age</th>
               <th className="py-2 font-medium" />
             </tr>
           </thead>
           <tbody>
-            {opportunities.length === 0 && (
+            {rows.length === 0 && (
               <tr>
-                <td colSpan={8} className="py-8 text-center text-[var(--muted)]">
+                <td colSpan={7} className="py-8 text-center text-[var(--muted)]">
                   No net-positive edges right now — scanning…
                 </td>
               </tr>
             )}
-            {opportunities.map((o) => (
-              <tr key={o.id} className="border-b border-[var(--border)]/60">
-                <td className="py-2.5 font-medium">{o.symbol}</td>
-                <td className="py-2.5">
-                  <span className="text-[var(--buy)]">{o.buy_exchange}</span>
-                  <span className="ml-2 text-[var(--muted)]">{o.buy_price.toFixed(2)}</span>
-                </td>
-                <td className="py-2.5">
-                  <span className="text-[var(--sell)]">{o.sell_exchange}</span>
-                  <span className="ml-2 text-[var(--muted)]">{o.sell_price.toFixed(2)}</span>
-                </td>
-                <td className="py-2.5">{o.raw_edge_pct.toFixed(3)}</td>
-                <td className="py-2.5 font-semibold text-[var(--accent)]">
-                  {o.net_edge_pct.toFixed(3)}
-                </td>
-                <td className="py-2.5 text-[var(--muted)]">
-                  {(o.buy_fee_pct + o.sell_fee_pct).toFixed(2)}% + slip{' '}
-                  {o.slippage_pct.toFixed(2)}%
-                </td>
-                <td className="py-2.5 text-[var(--muted)]">{ageSeconds(o.detected_at)}s</td>
-                <td className="py-2.5 text-right">
-                  <button
-                    type="button"
-                    disabled={busyId === o.id}
-                    onClick={() => void execute(o)}
-                    className="rounded bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-[#062016] disabled:opacity-50"
-                  >
-                    {busyId === o.id ? '…' : 'Paper exec'}
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {rows.map((o) => {
+              const blocked = o.executable === false
+              return (
+                <tr
+                  key={o.id}
+                  className={`border-b border-[var(--border)]/60 ${blocked ? 'opacity-55' : ''}`}
+                >
+                  <td className="py-2.5 text-[var(--muted)]">
+                    {o.kind === 'triangular' ? 'tri' : 'cross'}
+                  </td>
+                  <td className="py-2.5 font-medium">{o.path ?? o.symbol}</td>
+                  <td className="py-2.5">
+                    {o.kind === 'triangular' ? (
+                      <span className="text-[var(--sell)]">{o.buy_exchange}</span>
+                    ) : (
+                      <>
+                        <span className="text-[var(--buy)]">{o.buy_exchange}</span>
+                        <span className="mx-1 text-[var(--muted)]">→</span>
+                        <span className="text-[var(--sell)]">{o.sell_exchange}</span>
+                      </>
+                    )}
+                  </td>
+                  <td className="py-2.5 font-semibold text-[var(--accent)]">
+                    {o.net_edge_pct.toFixed(3)}
+                  </td>
+                  <td className="py-2.5 text-xs text-[var(--muted)]">
+                    {o.inventory_note ?? '—'}
+                    {o.max_notional_usdt != null && (
+                      <span className="ml-1 text-[var(--text)]">
+                        ({o.max_notional_usdt.toFixed(0)} max)
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-2.5 text-[var(--muted)]">{ageSeconds(o.detected_at)}s</td>
+                  <td className="py-2.5 text-right">
+                    <button
+                      type="button"
+                      disabled={busyId === o.id || blocked || o.kind === 'triangular'}
+                      onClick={() => void execute(o)}
+                      className="rounded bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-[#062016] disabled:opacity-40"
+                    >
+                      {busyId === o.id ? '…' : 'Paper exec'}
+                    </button>
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>

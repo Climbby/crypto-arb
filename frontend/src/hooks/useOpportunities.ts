@@ -7,6 +7,7 @@ type Snapshot = {
   scanCount: number
   connected: boolean
   lastUpdateAt: number | null
+  feedModes: Record<string, string>
 }
 
 export function useOpportunities(): Snapshot {
@@ -15,6 +16,7 @@ export function useOpportunities(): Snapshot {
   const [scanCount, setScanCount] = useState(0)
   const [connected, setConnected] = useState(false)
   const [lastUpdateAt, setLastUpdateAt] = useState<number | null>(null)
+  const [feedModes, setFeedModes] = useState<Record<string, string>>({})
   const wsRef = useRef<WebSocket | null>(null)
   const retryTimer = useRef<number | null>(null)
   const intentionalClose = useRef(false)
@@ -28,11 +30,13 @@ export function useOpportunities(): Snapshot {
       opportunities?: Opportunity[]
       prices?: Tick[]
       scan_count?: number
+      feed_modes?: Record<string, string>
     }) => {
       if (data.type && data.type !== 'opportunities') return
       if (data.opportunities) setOpportunities(data.opportunities)
       if (data.prices) setPrices(data.prices)
       if (typeof data.scan_count === 'number') setScanCount(data.scan_count)
+      if (data.feed_modes) setFeedModes(data.feed_modes)
       setLastUpdateAt(Date.now())
     }
 
@@ -109,5 +113,5 @@ export function useOpportunities(): Snapshot {
     }
   }, [])
 
-  return { opportunities, prices, scanCount, connected, lastUpdateAt }
+  return { opportunities, prices, scanCount, connected, lastUpdateAt, feedModes }
 }

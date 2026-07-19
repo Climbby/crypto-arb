@@ -1,3 +1,3 @@
-from app.feeds.poller import PricePoller, TickStore
+from app.feeds.poller import PriceFeed, PricePoller, TickStore
 
-__all__ = ["PricePoller", "TickStore"]
+__all__ = ["PriceFeed", "PricePoller", "TickStore"]
