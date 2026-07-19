@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, type Portfolio } from './api'
 import { Header } from './components/Header'
-import { OpportunityBoard } from './components/OpportunityBoard'
 import { PortfolioPanel } from './components/PortfolioPanel'
 import { PricesAndHistory } from './components/PricesAndHistory'
 import { SettingsPanel } from './components/SettingsPanel'
@@ -9,7 +8,7 @@ import { TradingViewChart } from './components/TradingViewChart'
 import { useOpportunities } from './hooks/useOpportunities'
 
 export default function App() {
-  const { opportunities, prices, scanCount, connected, lastUpdateAt, feedModes, autoPaper, autoFillSeq } =
+  const { prices, scanCount, connected, lastUpdateAt, feedModes, autoPaper, autoFillSeq } =
     useOpportunities()
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null)
   const [historyKey, setHistoryKey] = useState(0)
@@ -44,7 +43,6 @@ export default function App() {
       />
 
       <main className="mt-8 flex flex-col gap-6">
-        <OpportunityBoard opportunities={opportunities} onExecuted={refreshPaper} />
         <TradingViewChart />
         <PortfolioPanel
           portfolio={portfolio}

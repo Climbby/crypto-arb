@@ -191,7 +191,6 @@ export function PricesAndHistory({ prices, refreshKey, lastUpdateAt, feedModes }
         {historyChartData.length > 0 ? (
           <HoverLineChart
             data={historyChartData}
-            width={560}
             height={120}
             ariaLabel="Edge detections over time"
             className="mt-3 rounded border border-[var(--border)]/60 bg-[var(--bg)]/50"

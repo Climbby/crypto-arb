@@ -20,15 +20,6 @@ const VENUES = [
   { id: 'coinbase', label: 'Coinbase', tv: (base: string) => `COINBASE:${base}USD` },
 ] as const
 
-const INTERVALS = [
-  { id: '1', label: '1m' },
-  { id: '5', label: '5m' },
-  { id: '15', label: '15m' },
-  { id: '60', label: '1h' },
-  { id: '240', label: '4h' },
-  { id: 'D', label: '1D' },
-] as const
-
 let tvScriptPromise: Promise<void> | null = null
 
 function loadTradingViewScript(): Promise<void> {
@@ -58,7 +49,6 @@ export function TradingViewChart() {
   const containerRef = useRef<HTMLDivElement>(null)
   const [pair, setPair] = useState<(typeof SYMBOLS)[number]>(SYMBOLS[0])
   const [venue, setVenue] = useState<(typeof VENUES)[number]>(VENUES[0])
-  const [timeframe, setTimeframe] = useState<(typeof INTERVALS)[number]>(INTERVALS[2])
   const [error, setError] = useState<string | null>(null)
 
   const tvSymbol = venue.tv(pair.base)
@@ -80,7 +70,7 @@ export function TradingViewChart() {
         new window.TradingView.widget({
           autosize: true,
           symbol: tvSymbol,
-          interval: timeframe.id,
+          interval: '15',
           timezone: 'Etc/UTC',
           theme: 'dark',
           style: '1',
@@ -107,7 +97,7 @@ export function TradingViewChart() {
       cancelled = true
       if (containerRef.current) containerRef.current.innerHTML = ''
     }
-  }, [tvSymbol, timeframe.id, containerId])
+  }, [tvSymbol, containerId])
 
   return (
     <section className="rounded-lg border border-[var(--border)] bg-[var(--bg-panel)]/80 p-4">
@@ -115,7 +105,7 @@ export function TradingViewChart() {
         <div>
           <h2 className="m-0 text-lg font-medium">TradingView chart</h2>
           <p className="m-0 mt-1 text-xs text-[var(--muted)]">
-            Embedded market chart · {tvSymbol}
+            Embedded market chart · {tvSymbol} · change timeframe in the chart toolbar
           </p>
         </div>
         <div className="flex flex-wrap gap-2 text-sm">
@@ -144,20 +134,6 @@ export function TradingViewChart() {
             {VENUES.map((v) => (
               <option key={v.id} value={v.id}>
                 {v.label}
-              </option>
-            ))}
-          </select>
-          <select
-            value={timeframe.id}
-            onChange={(e) => {
-              const next = INTERVALS.find((i) => i.id === e.target.value)
-              if (next) setTimeframe(next)
-            }}
-            className="rounded border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5"
-          >
-            {INTERVALS.map((i) => (
-              <option key={i.id} value={i.id}>
-                {i.label}
               </option>
             ))}
           </select>
