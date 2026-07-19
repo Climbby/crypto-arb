@@ -23,6 +23,8 @@ from app.engine.triangular import triangular_symbols
 from app.feeds.poller import PriceFeed, TickStore
 from app.paper.auto import AutoPaperTrader
 from app.paper.broker import PaperBroker, PaperBrokerError
+from app.paper.equity import mark_equity_usdt
+from app.paper.rebalance import AutoRebalancer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -55,6 +57,9 @@ class SettingsUpdate(BaseModel):
     auto_paper_cooldown_seconds: float | None = Field(default=None, ge=0)
     auto_paper_max_per_scan: int | None = Field(default=None, ge=1, le=10)
     auto_paper_max_per_minute: int | None = Field(default=None, ge=1, le=60)
+    auto_rebalance_enabled: bool | None = None
+    auto_rebalance_cooldown_seconds: float | None = Field(default=None, ge=0)
+    auto_rebalance_usdt_chunk: float | None = Field(default=None, gt=0)
 
 
 class ConnectionManager:
@@ -109,6 +114,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         max_per_scan=settings.auto_paper_max_per_scan,
         max_per_minute=settings.auto_paper_max_per_minute,
     )
+    rebalancer = AutoRebalancer(
+        broker,
+        enabled=settings.auto_rebalance_enabled,
+        notional_usdt=settings.auto_paper_notional_usdt,
+        cooldown_seconds=settings.auto_rebalance_cooldown_seconds,
+        usdt_chunk=settings.auto_rebalance_usdt_chunk,
+    )
     manager = ConnectionManager()
 
     cross_symbols = list(settings.symbol_list)
@@ -135,6 +147,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             default_notional=auto.notional_usdt,
         )
 
+    async def snapshot_equity(ticks: list, note: str | None = None) -> dict[str, Any] | None:
+        portfolio = await broker.portfolio()
+        by_venue = portfolio.get("by_venue", {})
+        equity, cash = mark_equity_usdt(by_venue, ticks)
+        return await db.record_equity(
+            equity_usdt=equity,
+            realized_pnl_usdt=float(portfolio.get("realized_pnl_usdt") or 0),
+            usdt_total=cash,
+            note=note,
+        )
+
     async def on_prices_updated() -> None:
         ticks = await store.snapshot()
         opps = engine.scan(
@@ -150,7 +173,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             state["feed_modes"] = feed.modes
 
         fills: list[dict[str, Any]] = []
+        transfers: list[dict[str, Any]] = []
         async with auto_lock:
+            # First move inventory toward blocked edges, then try to fill
+            transfers = await rebalancer.maybe_rebalance(
+                opps,
+                fee_map=engine.fee_map,
+                min_edge=engine.min_net_edge_pct,
+            )
+            if transfers:
+                opps = await annotate(opps)
+                state["last_opps"] = opps
             fills = await auto.maybe_execute(
                 opps,
                 fee_map=engine.fee_map,
@@ -158,10 +191,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 scanner_min_edge=engine.min_net_edge_pct,
                 ticks=ticks,
             )
-        if fills:
-            # Inventory changed — refresh board flags for clients
+        if fills or transfers:
             opps = await annotate(opps)
             state["last_opps"] = opps
+            note = "fill" if fills else "rebalance"
+            if fills and transfers:
+                note = "fill+rebalance"
+            await snapshot_equity(ticks, note=note)
+        elif int(state["scan_count"]) % 20 == 0:
+            await snapshot_equity(ticks, note="heartbeat")
 
         await manager.broadcast(
             {
@@ -171,7 +209,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "scan_count": state["scan_count"],
                 "feed_modes": state["feed_modes"],
                 "auto_paper": auto.status(),
+                "auto_rebalance": rebalancer.status(),
                 "auto_fills": fills,
+                "auto_transfers": transfers,
             }
         )
         if opps and settings.persist_every_scan:
@@ -181,11 +221,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     pruned = await db.prune_opportunities(keep=8000)
                     if pruned:
                         logger.info("Pruned %s old opportunity snapshots", pruned)
+                    eq_pruned = await db.prune_equity(keep=4000)
+                    if eq_pruned:
+                        logger.info("Pruned %s old equity snapshots", eq_pruned)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         await db.connect()
         await broker.ensure_seeded()
+        existing = await db.list_equity(limit=1)
+        if not existing:
+            await db.record_equity(
+                equity_usdt=broker.starting_usdt,
+                realized_pnl_usdt=0.0,
+                usdt_total=broker.starting_usdt,
+                note="seed",
+            )
         feed = PriceFeed(
             exchanges=settings.exchange_list,
             symbols=state["feed_symbols"],
@@ -218,6 +269,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "feed_modes": state["feed_modes"],
             "triangular": settings.enable_triangular,
             "auto_paper": auto.status(),
+            "auto_rebalance": rebalancer.status(),
         }
 
     @app.get("/prices")
@@ -269,6 +321,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "auto_paper_max_per_scan": auto.max_per_scan,
             "auto_paper_max_per_minute": auto.max_per_minute,
             "auto_paper": auto.status(),
+            "auto_rebalance_enabled": rebalancer.enabled,
+            "auto_rebalance_cooldown_seconds": rebalancer.cooldown_seconds,
+            "auto_rebalance_usdt_chunk": rebalancer.usdt_chunk,
+            "auto_rebalance": rebalancer.status(),
         }
 
     @app.patch("/settings")
@@ -297,6 +353,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             auto.enabled = body.auto_paper_enabled
         if body.auto_paper_notional_usdt is not None:
             auto.notional_usdt = body.auto_paper_notional_usdt
+            rebalancer.notional_usdt = body.auto_paper_notional_usdt
         if "auto_paper_min_net_edge_pct" in body.model_fields_set:
             auto.min_net_edge_pct = body.auto_paper_min_net_edge_pct
         if body.auto_paper_cooldown_seconds is not None:
@@ -305,6 +362,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             auto.max_per_scan = body.auto_paper_max_per_scan
         if body.auto_paper_max_per_minute is not None:
             auto.max_per_minute = body.auto_paper_max_per_minute
+        if body.auto_rebalance_enabled is not None:
+            rebalancer.enabled = body.auto_rebalance_enabled
+        if body.auto_rebalance_cooldown_seconds is not None:
+            rebalancer.cooldown_seconds = body.auto_rebalance_cooldown_seconds
+        if body.auto_rebalance_usdt_chunk is not None:
+            rebalancer.usdt_chunk = body.auto_rebalance_usdt_chunk
         await db.set_setting(
             "runtime",
             {
@@ -319,6 +382,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "auto_paper_cooldown_seconds": auto.cooldown_seconds,
                 "auto_paper_max_per_scan": auto.max_per_scan,
                 "auto_paper_max_per_minute": auto.max_per_minute,
+                "auto_rebalance_enabled": rebalancer.enabled,
+                "auto_rebalance_cooldown_seconds": rebalancer.cooldown_seconds,
+                "auto_rebalance_usdt_chunk": rebalancer.usdt_chunk,
             },
         )
         await on_prices_updated()
@@ -327,6 +393,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/paper")
     async def paper_portfolio() -> dict[str, Any]:
         return await broker.portfolio()
+
+    @app.get("/paper/equity")
+    async def paper_equity(limit: int = 400) -> dict[str, Any]:
+        rows = await db.list_equity(limit=min(max(limit, 10), 2000))
+        ticks = await store.snapshot()
+        portfolio = await broker.portfolio()
+        equity, cash = mark_equity_usdt(portfolio.get("by_venue", {}), ticks)
+        return {
+            "current": {
+                "equity_usdt": equity,
+                "usdt_total": cash,
+                "realized_pnl_usdt": float(portfolio.get("realized_pnl_usdt") or 0),
+            },
+            "history": rows,
+            "auto_rebalance": rebalancer.status(),
+        }
 
     @app.post("/paper/reset")
     async def paper_reset() -> dict[str, Any]:
@@ -383,6 +465,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "feed_modes": state["feed_modes"],
                     "auto_paper": auto.status(),
                     "auto_fills": [],
+                    "auto_rebalance": rebalancer.status(),
+                    "auto_transfers": [],
                 }
             )
         )

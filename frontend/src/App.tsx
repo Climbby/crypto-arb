@@ -52,6 +52,7 @@ export default function App() {
           portfolio={portfolio}
           exchanges={EXCHANGES}
           onChange={refreshPaper}
+          refreshKey={historyKey + autoFillSeq}
         />
         <PricesAndHistory
           prices={prices}

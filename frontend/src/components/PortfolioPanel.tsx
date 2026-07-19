@@ -1,13 +1,14 @@
-import { useState } from 'react'
-import { api, type Portfolio } from '../api'
+import { useEffect, useMemo, useState } from 'react'
+import { api, type EquityPoint, type Portfolio } from '../api'
 
 type Props = {
   portfolio: Portfolio | null
   exchanges: string[]
   onChange: () => void
+  refreshKey?: number
 }
 
-export function PortfolioPanel({ portfolio, exchanges, onChange }: Props) {
+export function PortfolioPanel({ portfolio, exchanges, onChange, refreshKey = 0 }: Props) {
   const [asset, setAsset] = useState('USDT')
   const [fromVenue, setFromVenue] = useState(exchanges[0] ?? 'binance')
   const [toVenue, setToVenue] = useState(exchanges[1] ?? 'kraken')
@@ -15,6 +16,51 @@ export function PortfolioPanel({ portfolio, exchanges, onChange }: Props) {
   const [delayed, setDelayed] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [equityNow, setEquityNow] = useState<number | null>(null)
+  const [equityHist, setEquityHist] = useState<EquityPoint[]>([])
+  const [rebalanceNote, setRebalanceNote] = useState<string | null>(null)
+
+  useEffect(() => {
+    void api
+      .getEquity(400)
+      .then((r) => {
+        setEquityNow(r.current.equity_usdt)
+        setEquityHist(r.history)
+        const last = r.auto_rebalance?.last_result
+        if (last?.ok && last.from_venue && last.to_venue) {
+          setRebalanceNote(
+            `Last auto transfer: ${Number(last.amount).toFixed(4)} ${last.asset} ${last.from_venue}→${last.to_venue}`,
+          )
+        } else if (last?.reason) {
+          setRebalanceNote(last.reason)
+        } else if (r.auto_rebalance?.enabled) {
+          setRebalanceNote('Auto-rebalance ON — moves USDT/coins when a venue is short for an edge')
+        } else {
+          setRebalanceNote(null)
+        }
+      })
+      .catch(() => {
+        /* ignore */
+      })
+  }, [refreshKey, portfolio?.realized_pnl_usdt, portfolio?.trades.length])
+
+  const chart = useMemo(() => {
+    if (equityHist.length < 2) return null
+    const vals = equityHist.map((p) => p.equity_usdt)
+    const min = Math.min(...vals)
+    const max = Math.max(...vals)
+    const span = Math.max(max - min, 1)
+    const w = 640
+    const h = 140
+    const pad = 10
+    const step = (w - pad * 2) / Math.max(equityHist.length - 1, 1)
+    const points = equityHist.map((p, i) => {
+      const x = pad + i * step
+      const y = h - pad - ((p.equity_usdt - min) / span) * (h - pad * 2)
+      return `${x},${y}`
+    })
+    return { w, h, points: points.join(' '), min, max, start: vals[0], end: vals[vals.length - 1] }
+  }, [equityHist])
 
   async function reset() {
     setBusy(true)
@@ -48,12 +94,20 @@ export function PortfolioPanel({ portfolio, exchanges, onChange }: Props) {
     }
   }
 
+  const equityDelta =
+    chart == null ? null : chart.end - chart.start
+
   return (
     <section className="rounded-lg border border-[var(--border)] bg-[var(--bg-panel)]/80 p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="m-0 text-lg font-medium">Paper portfolio</h2>
           <p className="m-0 mt-1 text-xs text-[var(--muted)]">
+            Marked equity:{' '}
+            <span className="text-[var(--accent)]">
+              {(equityNow ?? 0).toFixed(2)} USDT
+            </span>
+            {' · '}
             Realized PnL:{' '}
             <span className="text-[var(--accent)]">
               {(portfolio?.realized_pnl_usdt ?? 0).toFixed(4)} USDT
@@ -76,6 +130,34 @@ export function PortfolioPanel({ portfolio, exchanges, onChange }: Props) {
         </p>
       )}
 
+      <div className="mb-4 rounded border border-[var(--border)]/80 bg-[var(--bg)]/40 p-3">
+        <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+          <h3 className="m-0 text-sm font-medium">Equity over time</h3>
+          <p className="m-0 text-xs text-[var(--muted)]">
+            {chart
+              ? `${chart.min.toFixed(0)} → ${chart.max.toFixed(0)} · Δ ${equityDelta! >= 0 ? '+' : ''}${equityDelta!.toFixed(2)}`
+              : 'Building history…'}
+          </p>
+        </div>
+        {chart ? (
+          <svg viewBox={`0 0 ${chart.w} ${chart.h}`} className="h-36 w-full" role="img">
+            <polyline
+              fill="none"
+              stroke="var(--accent)"
+              strokeWidth="2"
+              points={chart.points}
+            />
+          </svg>
+        ) : (
+          <p className="m-0 text-sm text-[var(--muted)]">
+            Equity curve starts after the first fills / rebalances (or a short heartbeat).
+          </p>
+        )}
+        {rebalanceNote && (
+          <p className="mt-2 m-0 text-xs text-[var(--muted)]">{rebalanceNote}</p>
+        )}
+      </div>
+
       <div className="mb-4 grid gap-3 sm:grid-cols-3">
         {Object.entries(portfolio?.by_venue ?? {}).map(([venue, assets]) => (
           <div key={venue} className="rounded border border-[var(--border)] bg-[var(--bg)]/60 p-3">
@@ -93,7 +175,7 @@ export function PortfolioPanel({ portfolio, exchanges, onChange }: Props) {
       </div>
 
       <div className="mb-4 rounded border border-[var(--border)]/80 p-3">
-        <p className="m-0 mb-2 text-sm font-medium">Rebalance transfer</p>
+        <p className="m-0 mb-2 text-sm font-medium">Manual rebalance transfer</p>
         <div className="flex flex-wrap gap-2 text-sm">
           <select
             value={asset}
@@ -155,42 +237,74 @@ export function PortfolioPanel({ portfolio, exchanges, onChange }: Props) {
           </button>
         </div>
         <p className="mt-2 text-xs text-[var(--muted)]">
-          Paper transfers are instant. The delayed flag only records that real withdrawals would
-          take time.
+          Auto-rebalance runs when an edge is blocked by inventory. Manual transfer is still
+          available; paper moves are instant (delayed is a flag only).
         </p>
       </div>
 
-      <div>
-        <h3 className="m-0 mb-2 text-sm font-medium text-[var(--muted)]">Trade log</h3>
-        <div className="max-h-48 overflow-auto text-sm">
-          {(portfolio?.trades.length ?? 0) === 0 ? (
-            <p className="text-[var(--muted)]">No paper trades yet.</p>
-          ) : (
-            <table className="w-full min-w-[560px] border-collapse">
-              <thead>
-                <tr className="text-left text-[var(--muted)]">
-                  <th className="py-1 font-medium">Time</th>
-                  <th className="py-1 font-medium">Route</th>
-                  <th className="py-1 font-medium">Qty</th>
-                  <th className="py-1 font-medium">PnL</th>
-                </tr>
-              </thead>
-              <tbody>
-                {portfolio!.trades.map((t) => (
-                  <tr key={t.id} className="border-t border-[var(--border)]/50">
-                    <td className="py-1.5 text-[var(--muted)]">
-                      {new Date(t.executed_at).toLocaleTimeString()}
-                    </td>
-                    <td className="py-1.5">
-                      {t.symbol} · {t.buy_exchange}→{t.sell_exchange}
-                    </td>
-                    <td className="py-1.5">{t.quantity.toFixed(6)}</td>
-                    <td className="py-1.5 text-[var(--accent)]">{t.pnl_usdt.toFixed(4)}</td>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div>
+          <h3 className="m-0 mb-2 text-sm font-medium text-[var(--muted)]">Trade log</h3>
+          <div className="max-h-48 overflow-auto text-sm">
+            {(portfolio?.trades.length ?? 0) === 0 ? (
+              <p className="text-[var(--muted)]">No paper trades yet.</p>
+            ) : (
+              <table className="w-full min-w-[420px] border-collapse">
+                <thead>
+                  <tr className="text-left text-[var(--muted)]">
+                    <th className="py-1 font-medium">Time</th>
+                    <th className="py-1 font-medium">Route</th>
+                    <th className="py-1 font-medium">PnL</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+                </thead>
+                <tbody>
+                  {portfolio!.trades.map((t) => (
+                    <tr key={t.id} className="border-t border-[var(--border)]/50">
+                      <td className="py-1.5 text-[var(--muted)]">
+                        {new Date(t.executed_at).toLocaleTimeString()}
+                      </td>
+                      <td className="py-1.5">
+                        {t.symbol} · {t.buy_exchange}→{t.sell_exchange}
+                      </td>
+                      <td className="py-1.5 text-[var(--accent)]">{t.pnl_usdt.toFixed(4)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+        <div>
+          <h3 className="m-0 mb-2 text-sm font-medium text-[var(--muted)]">Transfer log</h3>
+          <div className="max-h-48 overflow-auto text-sm">
+            {(portfolio?.transfers.length ?? 0) === 0 ? (
+              <p className="text-[var(--muted)]">No transfers yet.</p>
+            ) : (
+              <table className="w-full min-w-[420px] border-collapse">
+                <thead>
+                  <tr className="text-left text-[var(--muted)]">
+                    <th className="py-1 font-medium">Time</th>
+                    <th className="py-1 font-medium">Move</th>
+                    <th className="py-1 font-medium">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {portfolio!.transfers.map((t) => (
+                    <tr key={t.id} className="border-t border-[var(--border)]/50">
+                      <td className="py-1.5 text-[var(--muted)]">
+                        {new Date(t.transferred_at).toLocaleTimeString()}
+                      </td>
+                      <td className="py-1.5">
+                        {t.asset} · {t.from_venue}→{t.to_venue}
+                        {t.delayed ? ' · auto/delayed' : ''}
+                      </td>
+                      <td className="py-1.5">{Number(t.amount).toFixed(6)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
         </div>
       </div>
     </section>

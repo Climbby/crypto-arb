@@ -36,11 +36,18 @@ class PaperBroker:
         await self.db.clear_balances()
         await self.db.clear_trades()
         await self.db.clear_transfers()
+        await self.db.clear_equity()
         per_venue = self.starting_usdt / max(len(self.venues), 1)
         for venue in self.venues:
             await self.db.set_balance(venue, "USDT", per_venue)
             for coin, amount in self.seed_coins.items():
                 await self.db.set_balance(venue, coin, amount)
+        await self.db.record_equity(
+            equity_usdt=self.starting_usdt,
+            realized_pnl_usdt=0.0,
+            usdt_total=self.starting_usdt,
+            note="reset",
+        )
         return await self.portfolio()
 
     async def _balance_map(self) -> dict[tuple[str, str], float]:

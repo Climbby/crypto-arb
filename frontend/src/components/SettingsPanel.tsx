@@ -20,6 +20,9 @@ export function SettingsPanel({ onSaved }: Props) {
   const [autoCooldown, setAutoCooldown] = useState(12)
   const [autoMaxScan, setAutoMaxScan] = useState(3)
   const [autoMaxMin, setAutoMaxMin] = useState(20)
+  const [rebalanceEnabled, setRebalanceEnabled] = useState(true)
+  const [rebalanceCooldown, setRebalanceCooldown] = useState(20)
+  const [rebalanceChunk, setRebalanceChunk] = useState(500)
   const [msg, setMsg] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -41,6 +44,9 @@ export function SettingsPanel({ onSaved }: Props) {
       setAutoCooldown(s.auto_paper_cooldown_seconds ?? 12)
       setAutoMaxScan(s.auto_paper_max_per_scan ?? 3)
       setAutoMaxMin(s.auto_paper_max_per_minute ?? 20)
+      setRebalanceEnabled(s.auto_rebalance_enabled ?? true)
+      setRebalanceCooldown(s.auto_rebalance_cooldown_seconds ?? 20)
+      setRebalanceChunk(s.auto_rebalance_usdt_chunk ?? 500)
     })
   }, [])
 
@@ -65,6 +71,9 @@ export function SettingsPanel({ onSaved }: Props) {
         auto_paper_cooldown_seconds: autoCooldown,
         auto_paper_max_per_scan: autoMaxScan,
         auto_paper_max_per_minute: autoMaxMin,
+        auto_rebalance_enabled: rebalanceEnabled,
+        auto_rebalance_cooldown_seconds: rebalanceCooldown,
+        auto_rebalance_usdt_chunk: rebalanceChunk,
       })
       setSettings(updated)
       setMsg('Settings saved')
@@ -228,6 +237,42 @@ export function SettingsPanel({ onSaved }: Props) {
             max={60}
             value={autoMaxMin}
             onChange={(e) => setAutoMaxMin(Number(e.target.value))}
+            className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5"
+          />
+        </label>
+      </div>
+
+      <h3 className="mt-6 text-base font-medium">Auto rebalance</h3>
+      <p className="mt-1 text-xs text-[var(--muted)]">
+        When an edge is blocked (venue out of USDT or coins), move paper inventory from the richest
+        donor venue so the next scan can fill.
+      </p>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <label className="flex items-center gap-2 text-sm sm:col-span-2">
+          <input
+            type="checkbox"
+            checked={rebalanceEnabled}
+            onChange={(e) => setRebalanceEnabled(e.target.checked)}
+          />
+          <span>Enable auto rebalance transfers</span>
+        </label>
+        <label className="block text-sm">
+          <span className="text-[var(--muted)]">USDT chunk size</span>
+          <input
+            type="number"
+            step="50"
+            value={rebalanceChunk}
+            onChange={(e) => setRebalanceChunk(Number(e.target.value))}
+            className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5"
+          />
+        </label>
+        <label className="block text-sm">
+          <span className="text-[var(--muted)]">Rebalance cooldown (s)</span>
+          <input
+            type="number"
+            step="1"
+            value={rebalanceCooldown}
+            onChange={(e) => setRebalanceCooldown(Number(e.target.value))}
             className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5"
           />
         </label>

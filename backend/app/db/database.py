@@ -56,6 +56,15 @@ CREATE TABLE IF NOT EXISTS paper_transfers (
     transferred_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS paper_equity (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    equity_usdt REAL NOT NULL,
+    realized_pnl_usdt REAL NOT NULL,
+    usdt_total REAL NOT NULL,
+    note TEXT,
+    recorded_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS app_settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -350,6 +359,67 @@ class Database:
     async def clear_transfers(self) -> None:
         await self.conn.execute("DELETE FROM paper_transfers")
         await self.conn.commit()
+
+    async def record_equity(
+        self,
+        *,
+        equity_usdt: float,
+        realized_pnl_usdt: float,
+        usdt_total: float,
+        note: str | None = None,
+    ) -> dict[str, Any]:
+        now = utcnow().isoformat()
+        cur = await self.conn.execute(
+            """
+            INSERT INTO paper_equity
+            (equity_usdt, realized_pnl_usdt, usdt_total, note, recorded_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (equity_usdt, realized_pnl_usdt, usdt_total, note, now),
+        )
+        await self.conn.commit()
+        return {
+            "id": cur.lastrowid,
+            "equity_usdt": equity_usdt,
+            "realized_pnl_usdt": realized_pnl_usdt,
+            "usdt_total": usdt_total,
+            "note": note,
+            "recorded_at": now,
+        }
+
+    async def list_equity(self, limit: int = 500) -> list[dict[str, Any]]:
+        cur = await self.conn.execute(
+            """
+            SELECT * FROM paper_equity
+            ORDER BY id DESC LIMIT ?
+            """,
+            (limit,),
+        )
+        rows = await cur.fetchall()
+        # chronological for charts
+        return list(reversed([dict(r) for r in rows]))
+
+    async def clear_equity(self) -> None:
+        await self.conn.execute("DELETE FROM paper_equity")
+        await self.conn.commit()
+
+    async def prune_equity(self, keep: int = 4000) -> int:
+        cur = await self.conn.execute("SELECT COUNT(*) AS c FROM paper_equity")
+        row = await cur.fetchone()
+        count = int(row["c"]) if row else 0
+        if count <= keep:
+            return 0
+        drop = count - keep
+        await self.conn.execute(
+            """
+            DELETE FROM paper_equity WHERE id IN (
+              SELECT id FROM paper_equity ORDER BY id ASC LIMIT ?
+            )
+            """,
+            (drop,),
+        )
+        await self.conn.commit()
+        return drop
 
     async def get_setting(self, key: str) -> str | None:
         cur = await self.conn.execute(

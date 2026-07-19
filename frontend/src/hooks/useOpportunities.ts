@@ -59,6 +59,7 @@ export function useOpportunities(): Snapshot {
       feed_modes?: Record<string, string>
       auto_paper?: AutoPaperStatus
       auto_fills?: AutoFill[]
+      auto_transfers?: { ok: boolean }[]
     }) => {
       if (data.type && data.type !== 'opportunities') return
       if (data.opportunities) setOpportunities(data.opportunities)
@@ -66,7 +67,10 @@ export function useOpportunities(): Snapshot {
       if (typeof data.scan_count === 'number') setScanCount(data.scan_count)
       if (data.feed_modes) setFeedModes(data.feed_modes)
       if (data.auto_paper) setAutoPaper(data.auto_paper)
-      if (data.auto_fills && data.auto_fills.length > 0) {
+      if (
+        (data.auto_fills && data.auto_fills.length > 0) ||
+        (data.auto_transfers && data.auto_transfers.length > 0)
+      ) {
         setAutoFillSeq((n) => n + 1)
       }
       setLastUpdateAt(Date.now())

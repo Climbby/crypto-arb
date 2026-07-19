@@ -79,6 +79,15 @@ export type Portfolio = {
   note: string
 }
 
+export type EquityPoint = {
+  id: number
+  equity_usdt: number
+  realized_pnl_usdt: number
+  usdt_total: number
+  note: string | null
+  recorded_at: string
+}
+
 export type AppSettings = {
   min_net_edge_pct: number
   slippage_bps: number
@@ -97,6 +106,9 @@ export type AppSettings = {
   auto_paper_cooldown_seconds?: number
   auto_paper_max_per_scan?: number
   auto_paper_max_per_minute?: number
+  auto_rebalance_enabled?: boolean
+  auto_rebalance_cooldown_seconds?: number
+  auto_rebalance_usdt_chunk?: number
   auto_paper?: {
     enabled: boolean
     notional_usdt: number
@@ -110,7 +122,21 @@ export type AppSettings = {
       at?: number
     } | null
   }
+  auto_rebalance?: {
+    enabled: boolean
+    transfers_total: number
+    last_result: {
+      ok?: boolean
+      asset?: string
+      from_venue?: string
+      to_venue?: string
+      amount?: number
+      reason?: string
+      at?: number
+    } | null
+  }
 }
+
 
 
 export type HistoryRow = {
@@ -168,12 +194,21 @@ export const api = {
     auto_paper_cooldown_seconds: number
     auto_paper_max_per_scan: number
     auto_paper_max_per_minute: number
+    auto_rebalance_enabled: boolean
+    auto_rebalance_cooldown_seconds: number
+    auto_rebalance_usdt_chunk: number
   }>) =>
     request<AppSettings>('/settings', {
       method: 'PATCH',
       body: JSON.stringify(body),
     }),
   getPaper: () => request<Portfolio>('/paper'),
+  getEquity: (limit = 400) =>
+    request<{
+      current: { equity_usdt: number; usdt_total: number; realized_pnl_usdt: number }
+      history: EquityPoint[]
+      auto_rebalance?: AppSettings['auto_rebalance']
+    }>(`/paper/equity?limit=${limit}`),
   resetPaper: () => request<Portfolio>('/paper/reset', { method: 'POST' }),
   execute: (opportunity_id: string, notional_usdt: number) =>
     request<{ trade: PaperTrade; portfolio: Portfolio }>('/paper/execute', {

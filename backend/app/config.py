@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     auto_paper_cooldown_seconds: float = 12.0
     auto_paper_max_per_scan: int = 3
     auto_paper_max_per_minute: int = 20
+    # Move paper inventory when a venue is short for an edge
+    auto_rebalance_enabled: bool = True
+    auto_rebalance_cooldown_seconds: float = 20.0
+    auto_rebalance_usdt_chunk: float = 500.0
     # Persist every opportunity that clears the threshold (24/7 diary)
     persist_every_scan: bool = True
     # Optional path to built frontend (defaults to ../frontend/dist from backend/)
