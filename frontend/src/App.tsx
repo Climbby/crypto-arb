@@ -54,7 +54,7 @@ export default function App() {
       </main>
 
       <footer className="mt-10 border-t border-[var(--border)] pt-4 text-xs text-[var(--muted)]">
-        v1 · cross-exchange only · triangular arb and live trading deferred
+        v1 · cross + triangular paper · live trading deferred
       </footer>
     </div>
   )

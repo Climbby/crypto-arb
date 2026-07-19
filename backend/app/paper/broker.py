@@ -73,10 +73,33 @@ class PaperBroker:
         opportunity: Opportunity,
         notional_usdt: float,
         fee_map: dict[str, float],
+        *,
+        ticks_for_venue: dict[str, Any] | None = None,
+        slippage_bps: float = 5.0,
     ) -> dict[str, Any]:
         if notional_usdt <= 0:
             raise PaperBrokerError("notional_usdt must be positive")
+        if opportunity.kind == "triangular":
+            from app.models import Tick
 
+            if not ticks_for_venue:
+                raise PaperBrokerError("triangular exec requires live venue ticks")
+            book = {
+                sym: tick
+                for sym, tick in ticks_for_venue.items()
+                if isinstance(tick, Tick)
+            }
+            return await self._execute_triangular(
+                opportunity, notional_usdt, fee_map, book, slippage_bps
+            )
+        return await self._execute_cross(opportunity, notional_usdt, fee_map)
+
+    async def _execute_cross(
+        self,
+        opportunity: Opportunity,
+        notional_usdt: float,
+        fee_map: dict[str, float],
+    ) -> dict[str, Any]:
         buy_fee = fee_map.get(opportunity.buy_exchange, 0.001)
         sell_fee = fee_map.get(opportunity.sell_exchange, 0.001)
 
@@ -132,6 +155,64 @@ class PaperBroker:
             pnl_usdt=pnl,
         )
         return {"trade": trade, "portfolio": await self.portfolio()}
+
+    async def _execute_triangular(
+        self,
+        opportunity: Opportunity,
+        notional_usdt: float,
+        fee_map: dict[str, float],
+        book: dict[str, Any],
+        slippage_bps: float,
+    ) -> dict[str, Any]:
+        from app.engine.spread import bps_to_pct
+        from app.engine.triangular import path_required_symbols, simulate_unit_return
+
+        path = opportunity.path or opportunity.symbol
+        venue = opportunity.buy_exchange
+        required = path_required_symbols(path)
+        if required is None:
+            raise PaperBrokerError(f"Unknown triangular path: {path}")
+        missing = [s for s in required if s not in book]
+        if missing:
+            raise PaperBrokerError(f"Missing live ticks for {', '.join(missing)} on {venue}")
+
+        fee = fee_map.get(venue, 0.001)
+        slip_frac = bps_to_pct(slippage_bps) / 100.0
+        unit = simulate_unit_return(path, book, fee, slip_frac)
+        if unit is None or unit <= 0:
+            raise PaperBrokerError("Could not simulate triangular path with current books")
+
+        bal = await self._balance_map()
+        usdt = bal.get((venue, "USDT"), 0.0)
+        if usdt < notional_usdt:
+            raise PaperBrokerError(
+                f"Insufficient USDT on {venue}: need {notional_usdt:.4f}, have {usdt:.4f}"
+            )
+
+        end_usdt = notional_usdt * unit
+        pnl = end_usdt - notional_usdt
+        await self.db.set_balance(venue, "USDT", usdt - notional_usdt + end_usdt)
+
+        trade = await self.db.insert_trade(
+            opp_id=opportunity.id,
+            symbol=path,
+            buy_exchange=venue,
+            sell_exchange=venue,
+            quantity=notional_usdt,
+            buy_price=opportunity.buy_price,
+            sell_price=opportunity.sell_price,
+            net_edge_pct=opportunity.net_edge_pct,
+            pnl_usdt=pnl,
+        )
+        return {
+            "trade": trade,
+            "portfolio": await self.portfolio(),
+            "note": (
+                f"Triangular paper fill on {venue}: {path}. "
+                f"Spent {notional_usdt:.4f} USDT → {end_usdt:.4f} USDT "
+                f"(unit return {unit:.6f}). Intermediate coin legs are simulated, not inventory."
+            ),
+        }
 
     async def transfer(
         self,

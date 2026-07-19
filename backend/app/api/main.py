@@ -272,13 +272,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         opp = engine.get(body.opportunity_id)
         if opp is None:
             raise HTTPException(status_code=404, detail="Opportunity not found or expired")
+        ticks_for_venue = None
         if opp.kind == "triangular":
-            raise HTTPException(
-                status_code=400,
-                detail="Triangular paper exec not wired yet — use cross-exchange opportunities",
-            )
+            ticks = await store.snapshot()
+            ticks_for_venue = {
+                t.symbol: t for t in ticks if t.exchange == opp.buy_exchange
+            }
         try:
-            result = await broker.execute(opp, body.notional_usdt, engine.fee_map)
+            result = await broker.execute(
+                opp,
+                body.notional_usdt,
+                engine.fee_map,
+                ticks_for_venue=ticks_for_venue,
+                slippage_bps=engine.slippage_bps,
+            )
         except PaperBrokerError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return result

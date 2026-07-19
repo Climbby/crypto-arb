@@ -78,3 +78,41 @@ async def test_transfer(broker: PaperBroker):
     assert result["transfer"]["delayed"] is True
     assert result["portfolio"]["by_venue"]["binance"]["USDT"] == pytest.approx(4900.0)
     assert result["portfolio"]["by_venue"]["kraken"]["USDT"] == pytest.approx(5100.0)
+
+
+@pytest.mark.asyncio
+async def test_execute_triangular(broker: PaperBroker):
+    from app.models import Tick
+
+    book = {
+        "BTC/USDT": Tick(exchange="binance", symbol="BTC/USDT", bid=100.0, ask=100.0),
+        "ETH/BTC": Tick(exchange="binance", symbol="ETH/BTC", bid=0.05, ask=0.05),
+        "ETH/USDT": Tick(exchange="binance", symbol="ETH/USDT", bid=6.0, ask=6.0),
+    }
+    opp = Opportunity(
+        id="tri|binance|USDT>BTC>ETH>USDT",
+        symbol="USDT>BTC>ETH>USDT",
+        buy_exchange="binance",
+        sell_exchange="binance",
+        buy_price=100.0,
+        sell_price=6.0,
+        raw_edge_pct=20.0,
+        net_edge_pct=20.0,
+        buy_fee_pct=0.0,
+        sell_fee_pct=0.0,
+        slippage_pct=0.0,
+        detected_at=utcnow(),
+        kind="triangular",
+        path="USDT>BTC>ETH>USDT",
+    )
+    before = (await broker.portfolio())["by_venue"]["binance"]["USDT"]
+    result = await broker.execute(
+        opp,
+        notional_usdt=100.0,
+        fee_map={"binance": 0.0},
+        ticks_for_venue=book,
+        slippage_bps=0.0,
+    )
+    after = result["portfolio"]["by_venue"]["binance"]["USDT"]
+    assert result["trade"]["pnl_usdt"] == pytest.approx(20.0)
+    assert after == pytest.approx(before + 20.0)

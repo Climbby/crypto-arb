@@ -17,10 +17,6 @@ export function OpportunityBoard({ opportunities, onExecuted }: Props) {
   const [showBlocked, setShowBlocked] = useState(true)
 
   async function execute(opp: Opportunity) {
-    if (opp.kind === 'triangular') {
-      setError('Triangular paper exec is not wired yet — cross-exchange only.')
-      return
-    }
     setBusyId(opp.id)
     setError(null)
     try {
@@ -133,7 +129,7 @@ export function OpportunityBoard({ opportunities, onExecuted }: Props) {
                   <td className="py-2.5 text-right">
                     <button
                       type="button"
-                      disabled={busyId === o.id || blocked || o.kind === 'triangular'}
+                      disabled={busyId === o.id || blocked}
                       onClick={() => void execute(o)}
                       className="rounded bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-[#062016] disabled:opacity-40"
                     >

@@ -113,3 +113,20 @@ def find_triangular_opportunities(
 
     opps.sort(key=lambda o: o.net_edge_pct, reverse=True)
     return opps
+
+
+def simulate_unit_return(
+    path: str,
+    book: dict[str, Tick],
+    fee: float,
+    slip_frac: float,
+) -> float | None:
+    """USDT received per 1 USDT started after fees/slippage, or None if books missing."""
+    return _run_path(path, book, fee, slip_frac)
+
+
+def path_required_symbols(path: str) -> tuple[str, ...] | None:
+    for pid, required in TRI_PATHS:
+        if pid == path:
+            return required
+    return None
