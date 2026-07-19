@@ -91,12 +91,14 @@ async def backfill_equity_from_trades(
         if row is not None:
             start_eq = float(row["equity_usdt"])
             if abs(start_eq - mtm_baseline) < 50.0:
+                await _purge_understated_equity(db, mtm_baseline)
                 return 0
         await db.conn.execute("DELETE FROM paper_equity WHERE note LIKE 'backfill%'")
         await db.conn.commit()
     else:
         earliest = await db.earliest_equity_at()
         if earliest and earliest <= first_at:
+            await _purge_understated_equity(db, mtm_baseline)
             return 0
 
     try:
@@ -131,7 +133,12 @@ async def backfill_equity_from_trades(
         )
         written += 1
 
-    # Drop cash-only seed / understated early snapshots that predate warm books
+    await _purge_understated_equity(db, mtm_baseline)
+    return written
+
+
+async def _purge_understated_equity(db: Database, mtm_baseline: float) -> None:
+    """Drop cash-only seed / understated snapshots that punch holes in the chart."""
     await db.conn.execute(
         """
         DELETE FROM paper_equity
@@ -144,4 +151,3 @@ async def backfill_equity_from_trades(
         (mtm_baseline * 0.7,),
     )
     await db.conn.commit()
-    return written
