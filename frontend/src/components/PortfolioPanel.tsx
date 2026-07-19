@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, type EquityPoint, type Portfolio } from '../api'
+import { HoverLineChart, type ChartDatum } from './HoverLineChart'
 
 type Props = {
   portfolio: Portfolio | null
@@ -44,23 +45,26 @@ export function PortfolioPanel({ portfolio, exchanges, onChange, refreshKey = 0 
       })
   }, [refreshKey, portfolio?.realized_pnl_usdt, portfolio?.trades.length])
 
-  const chart = useMemo(() => {
+  const chartMeta = useMemo(() => {
     if (equityHist.length < 2) return null
     const vals = equityHist.map((p) => p.equity_usdt)
-    const min = Math.min(...vals)
-    const max = Math.max(...vals)
-    const span = Math.max(max - min, 1)
-    const w = 640
-    const h = 140
-    const pad = 10
-    const step = (w - pad * 2) / Math.max(equityHist.length - 1, 1)
-    const points = equityHist.map((p, i) => {
-      const x = pad + i * step
-      const y = h - pad - ((p.equity_usdt - min) / span) * (h - pad * 2)
-      return `${x},${y}`
-    })
-    return { w, h, points: points.join(' '), min, max, start: vals[0], end: vals[vals.length - 1] }
+    return {
+      min: Math.min(...vals),
+      max: Math.max(...vals),
+      start: vals[0],
+      end: vals[vals.length - 1],
+    }
   }, [equityHist])
+
+  const equityData: ChartDatum[] = useMemo(
+    () =>
+      equityHist.map((p) => ({
+        y: p.equity_usdt,
+        label: `${new Date(p.recorded_at).toLocaleString()}${p.note ? ` · ${p.note}` : ''}`,
+        valueLabel: `${p.equity_usdt.toFixed(2)} USDT`,
+      })),
+    [equityHist],
+  )
 
   async function reset() {
     setBusy(true)
@@ -95,7 +99,7 @@ export function PortfolioPanel({ portfolio, exchanges, onChange, refreshKey = 0 
   }
 
   const equityDelta =
-    chart == null ? null : chart.end - chart.start
+    chartMeta == null ? null : chartMeta.end - chartMeta.start
 
   return (
     <section className="rounded-lg border border-[var(--border)] bg-[var(--bg-panel)]/80 p-4">
@@ -134,20 +138,17 @@ export function PortfolioPanel({ portfolio, exchanges, onChange, refreshKey = 0 
         <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
           <h3 className="m-0 text-sm font-medium">Equity over time</h3>
           <p className="m-0 text-xs text-[var(--muted)]">
-            {chart
-              ? `${chart.min.toFixed(0)} → ${chart.max.toFixed(0)} · Δ ${equityDelta! >= 0 ? '+' : ''}${equityDelta!.toFixed(2)}`
+            {chartMeta
+              ? `${chartMeta.min.toFixed(0)} → ${chartMeta.max.toFixed(0)} · Δ ${equityDelta! >= 0 ? '+' : ''}${equityDelta!.toFixed(2)}`
               : 'Building history…'}
           </p>
         </div>
-        {chart ? (
-          <svg viewBox={`0 0 ${chart.w} ${chart.h}`} className="h-36 w-full" role="img">
-            <polyline
-              fill="none"
-              stroke="var(--accent)"
-              strokeWidth="2"
-              points={chart.points}
-            />
-          </svg>
+        {equityData.length >= 2 ? (
+          <HoverLineChart
+            data={equityData}
+            ariaLabel="Paper equity over time"
+            className="rounded border border-[var(--border)]/40 bg-[var(--bg)]/30"
+          />
         ) : (
           <p className="m-0 text-sm text-[var(--muted)]">
             Equity curve starts after the first fills / rebalances (or a short heartbeat).

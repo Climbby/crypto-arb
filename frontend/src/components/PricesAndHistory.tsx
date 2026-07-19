@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, type HistoryRow, type Stats, type Tick } from '../api'
+import { HoverLineChart, type ChartDatum } from './HoverLineChart'
 
 type Props = {
   prices: Tick[]
@@ -34,20 +35,19 @@ export function PricesAndHistory({ prices, refreshKey, lastUpdateAt, feedModes }
   const ageSec =
     lastUpdateAt == null ? null : Math.max(0, Math.floor((now - lastUpdateAt) / 1000))
 
-  const chart = useMemo(() => {
+  const historyChartData: ChartDatum[] = useMemo(() => {
     const buckets = stats?.buckets ?? []
-    if (buckets.length === 0) return null
-    const max = Math.max(...buckets.map((b) => Number(b.count) || 0), 1)
-    const w = 560
-    const h = 120
-    const pad = 8
-    const step = (w - pad * 2) / Math.max(buckets.length - 1, 1)
-    const points = buckets.map((b, i) => {
-      const x = pad + i * step
-      const y = h - pad - ((Number(b.count) || 0) / max) * (h - pad * 2)
-      return `${x},${y}`
+    return buckets.map((b) => {
+      const count = Number(b.count) || 0
+      const avg = Number(b.avg_net) || 0
+      const maxNet = Number(b.max_net) || 0
+      const when = b.bucket ? new Date(b.bucket).toLocaleString() : 'bucket'
+      return {
+        y: count,
+        label: `${when} · avg ${avg.toFixed(3)}% · max ${maxNet.toFixed(3)}%`,
+        valueLabel: `${count} edges`,
+      }
     })
-    return { w, h, points: points.join(' '), max }
   }, [stats])
 
   const majors = prices.filter(
@@ -133,20 +133,14 @@ export function PricesAndHistory({ prices, refreshKey, lastUpdateAt, feedModes }
           </p>
         )}
 
-        {chart ? (
-          <svg
-            viewBox={`0 0 ${chart.w} ${chart.h}`}
-            className="mt-3 w-full rounded border border-[var(--border)]/60 bg-[var(--bg)]/50"
-            role="img"
-            aria-label="Opportunity count over time"
-          >
-            <polyline
-              fill="none"
-              stroke="var(--accent)"
-              strokeWidth="2"
-              points={chart.points}
-            />
-          </svg>
+        {historyChartData.length > 0 ? (
+          <HoverLineChart
+            data={historyChartData}
+            width={560}
+            height={120}
+            ariaLabel="Opportunity count over time"
+            className="mt-3 rounded border border-[var(--border)]/60 bg-[var(--bg)]/50"
+          />
         ) : (
           <p className="mt-3 text-sm text-[var(--muted)]">No diary data in this window yet.</p>
         )}
