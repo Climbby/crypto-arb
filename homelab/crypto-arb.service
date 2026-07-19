@@ -1,0 +1,16 @@
+[Unit]
+Description=ArbWatch crypto arbitrage scanner
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/crypto-arb/backend
+Environment=PATH=/opt/crypto-arb/backend/.venv/bin:/usr/local/bin:/usr/bin
+EnvironmentFile=-/opt/crypto-arb/backend/.env
+ExecStart=/opt/crypto-arb/backend/.venv/bin/uvicorn app.api.main:app --host 127.0.0.1 --port 8010
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

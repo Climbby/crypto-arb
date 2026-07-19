@@ -1,0 +1,47 @@
+"""Application configuration."""
+
+from functools import lru_cache
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    host: str = "0.0.0.0"
+    port: int = 8000
+    poll_interval_seconds: float = 1.0
+    min_net_edge_pct: float = 0.05
+    slippage_bps: float = 5.0  # 5 bps = 0.05% per leg estimate
+    watched_symbols: str = "BTC/USDT,ETH/USDT,SOL/USDT"
+    exchanges: str = "binance,kraken,coinbase"
+    db_path: str = "data/crypto_arb.db"
+    paper_starting_usdt: float = 10_000.0
+    # Persist every opportunity that clears the threshold (24/7 diary)
+    persist_every_scan: bool = True
+    # Optional path to built frontend (defaults to ../frontend/dist from backend/)
+    frontend_dist: str = ""
+    # Default taker fees (fraction of notional)
+    fee_binance: float = 0.001
+    fee_kraken: float = 0.0026
+    fee_coinbase: float = 0.006
+
+    @property
+    def symbol_list(self) -> list[str]:
+        return [s.strip() for s in self.watched_symbols.split(",") if s.strip()]
+
+    @property
+    def exchange_list(self) -> list[str]:
+        return [e.strip().lower() for e in self.exchanges.split(",") if e.strip()]
+
+    def fee_map(self) -> dict[str, float]:
+        return {
+            "binance": self.fee_binance,
+            "kraken": self.fee_kraken,
+            "coinbase": self.fee_coinbase,
+        }
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
