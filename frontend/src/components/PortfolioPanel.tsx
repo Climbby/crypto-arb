@@ -22,11 +22,11 @@ export function PortfolioPanel({ portfolio, onChange, refreshKey = 0 }: Props) {
   const [equityNow, setEquityNow] = useState<number | null>(null)
   const [equityHist, setEquityHist] = useState<EquityPoint[]>([])
   const [rebalanceNote, setRebalanceNote] = useState<string | null>(null)
-  const [hours, setHours] = useState<number | null>(24)
+  const [hours, setHours] = useState<number | null>(null)
 
   useEffect(() => {
     void api
-      .getEquity(400, hours)
+      .getEquity(2000, hours)
       .then((r) => {
         setEquityNow(r.current.equity_usdt)
         setEquityHist(r.history)

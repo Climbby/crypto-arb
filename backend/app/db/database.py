@@ -367,8 +367,9 @@ class Database:
         realized_pnl_usdt: float,
         usdt_total: float,
         note: str | None = None,
+        recorded_at: str | None = None,
     ) -> dict[str, Any]:
-        now = utcnow().isoformat()
+        now = recorded_at or utcnow().isoformat()
         cur = await self.conn.execute(
             """
             INSERT INTO paper_equity
@@ -398,7 +399,8 @@ class Database:
                 """
                 SELECT * FROM paper_equity
                 WHERE recorded_at >= ?
-                ORDER BY id DESC LIMIT ?
+                ORDER BY recorded_at DESC, id DESC
+                LIMIT ?
                 """,
                 (cutoff, limit),
             )
@@ -406,13 +408,27 @@ class Database:
             cur = await self.conn.execute(
                 """
                 SELECT * FROM paper_equity
-                ORDER BY id DESC LIMIT ?
+                ORDER BY recorded_at DESC, id DESC
+                LIMIT ?
                 """,
                 (limit,),
             )
         rows = await cur.fetchall()
         # chronological for charts
         return list(reversed([dict(r) for r in rows]))
+
+    async def earliest_equity_at(self) -> str | None:
+        cur = await self.conn.execute(
+            "SELECT MIN(recorded_at) AS t FROM paper_equity"
+        )
+        row = await cur.fetchone()
+        return None if row is None or row["t"] is None else str(row["t"])
+
+    async def has_backfill_equity(self) -> bool:
+        cur = await self.conn.execute(
+            "SELECT 1 FROM paper_equity WHERE note LIKE 'backfill%' LIMIT 1"
+        )
+        return await cur.fetchone() is not None
 
     async def clear_equity(self) -> None:
         await self.conn.execute("DELETE FROM paper_equity")

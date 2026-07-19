@@ -23,7 +23,7 @@ from app.engine.triangular import triangular_symbols
 from app.feeds.poller import PriceFeed, TickStore
 from app.paper.auto import AutoPaperTrader
 from app.paper.broker import PaperBroker, PaperBrokerError
-from app.paper.equity import mark_equity_usdt
+from app.paper.equity import backfill_equity_from_trades, mark_equity_usdt
 from app.paper.rebalance import AutoRebalancer
 
 logging.basicConfig(level=logging.INFO)
@@ -137,6 +137,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     feed_holder: dict[str, PriceFeed | None] = {"feed": None}
     persist_lock = asyncio.Lock()
     auto_lock = asyncio.Lock()
+    backfill_state = {"done": False}
 
     async def annotate(opps: list) -> list:
         portfolio = await broker.portfolio()
@@ -158,8 +159,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             note=note,
         )
 
+    async def maybe_backfill_equity(ticks: list) -> None:
+        if backfill_state["done"]:
+            return
+        backfill_state["done"] = True
+        portfolio = await broker.portfolio()
+        written = await backfill_equity_from_trades(
+            db,
+            by_venue=portfolio.get("by_venue", {}),
+            ticks=ticks,
+            realized_pnl_usdt=float(portfolio.get("realized_pnl_usdt") or 0),
+        )
+        if written:
+            logger.info("Backfilled %s equity points from paper trades", written)
+
     async def on_prices_updated() -> None:
         ticks = await store.snapshot()
+        await maybe_backfill_equity(ticks)
         opps = engine.scan(
             ticks,
             state["symbols"],
@@ -198,7 +214,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if fills and transfers:
                 note = "fill+rebalance"
             await snapshot_equity(ticks, note=note)
-        elif int(state["scan_count"]) % 20 == 0:
+        elif int(state["scan_count"]) % 5 == 0:
             await snapshot_equity(ticks, note="heartbeat")
 
         await manager.broadcast(

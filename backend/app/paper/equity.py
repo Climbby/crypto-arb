@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
+from app.db.database import Database
 from app.models import Tick
 
 MAJOR_USDT = ("BTC/USDT", "ETH/USDT", "SOL/USDT")
@@ -10,7 +13,6 @@ MAJOR_USDT = ("BTC/USDT", "ETH/USDT", "SOL/USDT")
 def mid_prices_usdt(ticks: list[Tick]) -> dict[str, float]:
     """Best-effort mid USD(T) prices keyed by base asset (BTC, ETH, SOL)."""
     prices: dict[str, float] = {}
-    # Prefer later ticks; still fine if multiple venues overwrite
     for t in ticks:
         if t.symbol not in MAJOR_USDT:
             continue
@@ -42,3 +44,71 @@ def mark_equity_usdt(
             elif asset in px:
                 equity += amt * px[asset]
     return equity, cash
+
+
+async def backfill_equity_from_trades(
+    db: Database,
+    *,
+    by_venue: dict[str, dict[str, float]],
+    ticks: list[Tick],
+    realized_pnl_usdt: float,
+) -> int:
+    """
+    Reconstruct earlier equity points from the paper trade log.
+
+    Uses today's mark-to-market as a flat baseline and layers cumulative
+    realized PnL so the chart covers trading that happened before equity
+    snapshots existed.
+    """
+    if await db.has_backfill_equity():
+        return 0
+
+    trades = await db.list_trades(limit=5000)
+    if not trades:
+        return 0
+
+    chronological = list(reversed(trades))
+    first_at = str(chronological[0].get("executed_at") or "")
+    if not first_at:
+        return 0
+
+    earliest = await db.earliest_equity_at()
+    if earliest and earliest <= first_at:
+        return 0
+
+    equity_now, cash_now = mark_equity_usdt(by_venue, ticks)
+    mtm_baseline = equity_now - float(realized_pnl_usdt)
+    cash_baseline = cash_now - float(realized_pnl_usdt)
+
+    try:
+        start_dt = datetime.fromisoformat(first_at.replace("Z", "+00:00")) - timedelta(seconds=1)
+        if start_dt.tzinfo is None:
+            start_dt = start_dt.replace(tzinfo=timezone.utc)
+        start_iso = start_dt.isoformat()
+    except ValueError:
+        start_iso = first_at
+
+    await db.record_equity(
+        equity_usdt=mtm_baseline,
+        realized_pnl_usdt=0.0,
+        usdt_total=cash_baseline,
+        note="backfill:start",
+        recorded_at=start_iso,
+    )
+
+    cum = 0.0
+    written = 1
+    for trade in chronological:
+        cum += float(trade.get("pnl_usdt") or 0.0)
+        ts = str(trade.get("executed_at") or "")
+        if not ts:
+            continue
+        await db.record_equity(
+            equity_usdt=mtm_baseline + cum,
+            realized_pnl_usdt=cum,
+            usdt_total=cash_baseline + cum,
+            note="backfill:trade",
+            recorded_at=ts,
+        )
+        written += 1
+    return written
