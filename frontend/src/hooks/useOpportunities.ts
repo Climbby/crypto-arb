@@ -1,6 +1,28 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, type Opportunity, type Tick, wsUrl } from '../api'
 
+export type AutoPaperStatus = {
+  enabled: boolean
+  notional_usdt: number
+  fills_total: number
+  last_result: {
+    ok?: boolean
+    opp_id?: string
+    symbol?: string
+    pnl_usdt?: number
+    reason?: string
+    at?: number
+  } | null
+}
+
+export type AutoFill = {
+  ok: boolean
+  opp_id: string
+  symbol: string
+  pnl_usdt?: number
+  notional_usdt?: number
+}
+
 type Snapshot = {
   opportunities: Opportunity[]
   prices: Tick[]
@@ -8,6 +30,8 @@ type Snapshot = {
   connected: boolean
   lastUpdateAt: number | null
   feedModes: Record<string, string>
+  autoPaper: AutoPaperStatus | null
+  autoFillSeq: number
 }
 
 export function useOpportunities(): Snapshot {
@@ -17,6 +41,8 @@ export function useOpportunities(): Snapshot {
   const [connected, setConnected] = useState(false)
   const [lastUpdateAt, setLastUpdateAt] = useState<number | null>(null)
   const [feedModes, setFeedModes] = useState<Record<string, string>>({})
+  const [autoPaper, setAutoPaper] = useState<AutoPaperStatus | null>(null)
+  const [autoFillSeq, setAutoFillSeq] = useState(0)
   const wsRef = useRef<WebSocket | null>(null)
   const retryTimer = useRef<number | null>(null)
   const intentionalClose = useRef(false)
@@ -31,12 +57,18 @@ export function useOpportunities(): Snapshot {
       prices?: Tick[]
       scan_count?: number
       feed_modes?: Record<string, string>
+      auto_paper?: AutoPaperStatus
+      auto_fills?: AutoFill[]
     }) => {
       if (data.type && data.type !== 'opportunities') return
       if (data.opportunities) setOpportunities(data.opportunities)
       if (data.prices) setPrices(data.prices)
       if (typeof data.scan_count === 'number') setScanCount(data.scan_count)
       if (data.feed_modes) setFeedModes(data.feed_modes)
+      if (data.auto_paper) setAutoPaper(data.auto_paper)
+      if (data.auto_fills && data.auto_fills.length > 0) {
+        setAutoFillSeq((n) => n + 1)
+      }
       setLastUpdateAt(Date.now())
     }
 
@@ -90,13 +122,18 @@ export function useOpportunities(): Snapshot {
 
     // REST fallback so the board keeps moving even if WS stalls
     const poll = window.setInterval(() => {
-      void Promise.all([api.getPrices(), api.getOpportunities(), fetch(`${import.meta.env.DEV ? '/api' : ''}/health`).then((r) => r.json())])
+      void Promise.all([
+        api.getPrices(),
+        api.getOpportunities(),
+        fetch(`${import.meta.env.DEV ? '/api' : ''}/health`).then((r) => r.json()),
+      ])
         .then(([priceRes, oppRes, health]) => {
           applySnapshot({
             type: 'opportunities',
             prices: priceRes.prices,
             opportunities: oppRes.opportunities,
             scan_count: typeof health.scan_count === 'number' ? health.scan_count : undefined,
+            auto_paper: health.auto_paper,
           })
         })
         .catch(() => {
@@ -113,5 +150,14 @@ export function useOpportunities(): Snapshot {
     }
   }, [])
 
-  return { opportunities, prices, scanCount, connected, lastUpdateAt, feedModes }
+  return {
+    opportunities,
+    prices,
+    scanCount,
+    connected,
+    lastUpdateAt,
+    feedModes,
+    autoPaper,
+    autoFillSeq,
+  }
 }

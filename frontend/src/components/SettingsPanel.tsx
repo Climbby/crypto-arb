@@ -14,6 +14,12 @@ export function SettingsPanel({ onSaved }: Props) {
   const [feeCoinbase, setFeeCoinbase] = useState(0.006)
   const [symbols, setSymbols] = useState('BTC/USDT,ETH/USDT,SOL/USDT')
   const [starting, setStarting] = useState(10000)
+  const [autoEnabled, setAutoEnabled] = useState(true)
+  const [autoNotional, setAutoNotional] = useState(100)
+  const [autoMinEdge, setAutoMinEdge] = useState('')
+  const [autoCooldown, setAutoCooldown] = useState(45)
+  const [autoMaxScan, setAutoMaxScan] = useState(1)
+  const [autoMaxMin, setAutoMaxMin] = useState(8)
   const [msg, setMsg] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -27,6 +33,14 @@ export function SettingsPanel({ onSaved }: Props) {
       setFeeCoinbase(s.fees.coinbase ?? 0.006)
       setSymbols(s.watched_symbols.join(','))
       setStarting(s.paper_starting_usdt)
+      setAutoEnabled(s.auto_paper_enabled ?? true)
+      setAutoNotional(s.auto_paper_notional_usdt ?? 100)
+      setAutoMinEdge(
+        s.auto_paper_min_net_edge_pct == null ? '' : String(s.auto_paper_min_net_edge_pct),
+      )
+      setAutoCooldown(s.auto_paper_cooldown_seconds ?? 45)
+      setAutoMaxScan(s.auto_paper_max_per_scan ?? 1)
+      setAutoMaxMin(s.auto_paper_max_per_minute ?? 8)
     })
   }, [])
 
@@ -45,6 +59,12 @@ export function SettingsPanel({ onSaved }: Props) {
           .map((s) => s.trim())
           .filter(Boolean),
         paper_starting_usdt: starting,
+        auto_paper_enabled: autoEnabled,
+        auto_paper_notional_usdt: autoNotional,
+        auto_paper_min_net_edge_pct: autoMinEdge.trim() === '' ? null : Number(autoMinEdge),
+        auto_paper_cooldown_seconds: autoCooldown,
+        auto_paper_max_per_scan: autoMaxScan,
+        auto_paper_max_per_minute: autoMaxMin,
       })
       setSettings(updated)
       setMsg('Settings saved')
@@ -137,6 +157,77 @@ export function SettingsPanel({ onSaved }: Props) {
             type="text"
             value={symbols}
             onChange={(e) => setSymbols(e.target.value)}
+            className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5"
+          />
+        </label>
+      </div>
+
+      <h3 className="mt-6 text-base font-medium">Auto paper</h3>
+      <p className="mt-1 text-xs text-[var(--muted)]">
+        Fills the best executable edge each scan (paper only). Cooldown stops the same id from
+        firing every tick.
+      </p>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <label className="flex items-center gap-2 text-sm sm:col-span-2">
+          <input
+            type="checkbox"
+            checked={autoEnabled}
+            onChange={(e) => setAutoEnabled(e.target.checked)}
+          />
+          <span>Enable auto paper trading</span>
+        </label>
+        <label className="block text-sm">
+          <span className="text-[var(--muted)]">Notional USDT per fill</span>
+          <input
+            type="number"
+            step="10"
+            value={autoNotional}
+            onChange={(e) => setAutoNotional(Number(e.target.value))}
+            className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5"
+          />
+        </label>
+        <label className="block text-sm">
+          <span className="text-[var(--muted)]">Auto min edge % (blank = board min)</span>
+          <input
+            type="text"
+            inputMode="decimal"
+            placeholder="same as board"
+            value={autoMinEdge}
+            onChange={(e) => setAutoMinEdge(e.target.value)}
+            className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5"
+          />
+        </label>
+        <label className="block text-sm">
+          <span className="text-[var(--muted)]">Cooldown per opportunity (s)</span>
+          <input
+            type="number"
+            step="1"
+            value={autoCooldown}
+            onChange={(e) => setAutoCooldown(Number(e.target.value))}
+            className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5"
+          />
+        </label>
+        <label className="block text-sm">
+          <span className="text-[var(--muted)]">Max fills / scan</span>
+          <input
+            type="number"
+            step="1"
+            min={1}
+            max={10}
+            value={autoMaxScan}
+            onChange={(e) => setAutoMaxScan(Number(e.target.value))}
+            className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5"
+          />
+        </label>
+        <label className="block text-sm">
+          <span className="text-[var(--muted)]">Max fills / minute</span>
+          <input
+            type="number"
+            step="1"
+            min={1}
+            max={60}
+            value={autoMaxMin}
+            onChange={(e) => setAutoMaxMin(Number(e.target.value))}
             className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5"
           />
         </label>

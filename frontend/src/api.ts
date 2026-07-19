@@ -87,7 +87,31 @@ export type AppSettings = {
   exchanges: string[]
   paper_starting_usdt: number
   poll_interval_seconds: number
+  feed_emit_ms?: number
+  use_websocket_feeds?: boolean
+  enable_triangular?: boolean
+  feed_modes?: Record<string, string>
+  auto_paper_enabled?: boolean
+  auto_paper_notional_usdt?: number
+  auto_paper_min_net_edge_pct?: number | null
+  auto_paper_cooldown_seconds?: number
+  auto_paper_max_per_scan?: number
+  auto_paper_max_per_minute?: number
+  auto_paper?: {
+    enabled: boolean
+    notional_usdt: number
+    fills_total: number
+    last_result: {
+      ok?: boolean
+      opp_id?: string
+      symbol?: string
+      pnl_usdt?: number
+      reason?: string
+      at?: number
+    } | null
+  }
 }
+
 
 export type HistoryRow = {
   id: number
@@ -138,6 +162,12 @@ export const api = {
     fee_coinbase: number
     watched_symbols: string[]
     paper_starting_usdt: number
+    auto_paper_enabled: boolean
+    auto_paper_notional_usdt: number
+    auto_paper_min_net_edge_pct: number | null
+    auto_paper_cooldown_seconds: number
+    auto_paper_max_per_scan: number
+    auto_paper_max_per_minute: number
   }>) =>
     request<AppSettings>('/settings', {
       method: 'PATCH',

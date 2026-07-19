@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
+import type { AutoPaperStatus } from '../hooks/useOpportunities'
 
 type Props = {
   connected: boolean
   scanCount: number
   lastUpdateAt: number | null
+  autoPaper: AutoPaperStatus | null
 }
 
-export function Header({ connected, scanCount, lastUpdateAt }: Props) {
+export function Header({ connected, scanCount, lastUpdateAt, autoPaper }: Props) {
   const [now, setNow] = useState(Date.now())
 
   useEffect(() => {
@@ -16,6 +18,17 @@ export function Header({ connected, scanCount, lastUpdateAt }: Props) {
 
   const ageSec =
     lastUpdateAt == null ? null : Math.max(0, Math.floor((now - lastUpdateAt) / 1000))
+
+  const last = autoPaper?.last_result
+  let autoLabel = 'Auto paper: off'
+  if (autoPaper?.enabled) {
+    if (last?.ok && last.symbol) {
+      const pnl = typeof last.pnl_usdt === 'number' ? ` · PnL ${last.pnl_usdt.toFixed(2)}` : ''
+      autoLabel = `Auto · ${autoPaper.fills_total} fills · last ${last.symbol}${pnl}`
+    } else {
+      autoLabel = `Auto paper ON · ${autoPaper.fills_total} fills`
+    }
+  }
 
   return (
     <header className="flex flex-wrap items-end justify-between gap-4 border-b border-[var(--border)] pb-5">
@@ -27,8 +40,8 @@ export function Header({ connected, scanCount, lastUpdateAt }: Props) {
           Arb<span className="text-[var(--accent)]">Watch</span>
         </h1>
         <p className="mt-2 max-w-xl text-sm text-[var(--muted)]">
-          Live scanner + paper trader. Edges include fees and slippage estimates — not executable
-          profit after latency, depth, or transfers.
+          Live scanner + auto paper trader. Edges include fees and slippage estimates — not
+          executable profit after latency, depth, or transfers.
         </p>
       </div>
       <div className="flex flex-wrap items-center gap-4 text-sm text-[var(--muted)]">
@@ -42,6 +55,7 @@ export function Header({ connected, scanCount, lastUpdateAt }: Props) {
         <span>
           {ageSec == null ? 'No ticks yet' : ageSec === 0 ? 'Tick: now' : `Tick: ${ageSec}s ago`}
         </span>
+        <span className={autoPaper?.enabled ? 'text-[var(--accent)]' : ''}>{autoLabel}</span>
       </div>
     </header>
   )

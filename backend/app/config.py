@@ -20,6 +20,14 @@ class Settings(BaseSettings):
     exchanges: str = "binance,kraken,coinbase"
     db_path: str = "data/crypto_arb.db"
     paper_starting_usdt: float = 10_000.0
+    # Auto paper: fill when edge + inventory clear (paper only)
+    auto_paper_enabled: bool = True
+    auto_paper_notional_usdt: float = 100.0
+    # None → use min_net_edge_pct; set higher to be pickier than the board
+    auto_paper_min_net_edge_pct: float | None = None
+    auto_paper_cooldown_seconds: float = 45.0
+    auto_paper_max_per_scan: int = 1
+    auto_paper_max_per_minute: int = 8
     # Persist every opportunity that clears the threshold (24/7 diary)
     persist_every_scan: bool = True
     # Optional path to built frontend (defaults to ../frontend/dist from backend/)

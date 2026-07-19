@@ -11,7 +11,7 @@ import { useOpportunities } from './hooks/useOpportunities'
 const EXCHANGES = ['binance', 'kraken', 'coinbase']
 
 export default function App() {
-  const { opportunities, prices, scanCount, connected, lastUpdateAt, feedModes } =
+  const { opportunities, prices, scanCount, connected, lastUpdateAt, feedModes, autoPaper, autoFillSeq } =
     useOpportunities()
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null)
   const [historyKey, setHistoryKey] = useState(0)
@@ -25,6 +25,10 @@ export default function App() {
     refreshPaper()
   }, [refreshPaper])
 
+  useEffect(() => {
+    if (autoFillSeq > 0) refreshPaper()
+  }, [autoFillSeq, refreshPaper])
+
   // Refresh history periodically when scans advance
   useEffect(() => {
     if (scanCount > 0 && scanCount % 5 === 0) {
@@ -34,7 +38,12 @@ export default function App() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
-      <Header connected={connected} scanCount={scanCount} lastUpdateAt={lastUpdateAt} />
+      <Header
+        connected={connected}
+        scanCount={scanCount}
+        lastUpdateAt={lastUpdateAt}
+        autoPaper={autoPaper}
+      />
 
       <main className="mt-8 flex flex-col gap-6">
         <OpportunityBoard opportunities={opportunities} onExecuted={refreshPaper} />
@@ -54,7 +63,7 @@ export default function App() {
       </main>
 
       <footer className="mt-10 border-t border-[var(--border)] pt-4 text-xs text-[var(--muted)]">
-        v1 · cross + triangular paper · live trading deferred
+        v1 · auto paper on edges · live trading deferred
       </footer>
     </div>
   )

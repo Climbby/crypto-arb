@@ -21,6 +21,7 @@ from app.engine.inventory import annotate_inventory
 from app.engine.spread import SpreadEngine
 from app.engine.triangular import triangular_symbols
 from app.feeds.poller import PriceFeed, TickStore
+from app.paper.auto import AutoPaperTrader
 from app.paper.broker import PaperBroker, PaperBrokerError
 
 logging.basicConfig(level=logging.INFO)
@@ -48,6 +49,12 @@ class SettingsUpdate(BaseModel):
     fee_coinbase: float | None = None
     watched_symbols: list[str] | None = None
     paper_starting_usdt: float | None = None
+    auto_paper_enabled: bool | None = None
+    auto_paper_notional_usdt: float | None = Field(default=None, gt=0)
+    auto_paper_min_net_edge_pct: float | None = None
+    auto_paper_cooldown_seconds: float | None = Field(default=None, ge=0)
+    auto_paper_max_per_scan: int | None = Field(default=None, ge=1, le=10)
+    auto_paper_max_per_minute: int | None = Field(default=None, ge=1, le=60)
 
 
 class ConnectionManager:
@@ -93,6 +100,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         venues=settings.exchange_list,
         starting_usdt=settings.paper_starting_usdt,
     )
+    auto = AutoPaperTrader(
+        broker,
+        enabled=settings.auto_paper_enabled,
+        notional_usdt=settings.auto_paper_notional_usdt,
+        min_net_edge_pct=settings.auto_paper_min_net_edge_pct,
+        cooldown_seconds=settings.auto_paper_cooldown_seconds,
+        max_per_scan=settings.auto_paper_max_per_scan,
+        max_per_minute=settings.auto_paper_max_per_minute,
+    )
     manager = ConnectionManager()
 
     cross_symbols = list(settings.symbol_list)
@@ -108,10 +124,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     }
     feed_holder: dict[str, PriceFeed | None] = {"feed": None}
     persist_lock = asyncio.Lock()
+    auto_lock = asyncio.Lock()
 
     async def annotate(opps: list) -> list:
         portfolio = await broker.portfolio()
-        return annotate_inventory(opps, portfolio.get("by_venue", {}), engine.fee_map)
+        return annotate_inventory(
+            opps,
+            portfolio.get("by_venue", {}),
+            engine.fee_map,
+            default_notional=auto.notional_usdt,
+        )
 
     async def on_prices_updated() -> None:
         ticks = await store.snapshot()
@@ -126,6 +148,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         feed = feed_holder["feed"]
         if feed:
             state["feed_modes"] = feed.modes
+
+        fills: list[dict[str, Any]] = []
+        async with auto_lock:
+            fills = await auto.maybe_execute(
+                opps,
+                fee_map=engine.fee_map,
+                slippage_bps=engine.slippage_bps,
+                scanner_min_edge=engine.min_net_edge_pct,
+                ticks=ticks,
+            )
+        if fills:
+            # Inventory changed — refresh board flags for clients
+            opps = await annotate(opps)
+            state["last_opps"] = opps
+
         await manager.broadcast(
             {
                 "type": "opportunities",
@@ -133,6 +170,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "prices": [t.to_dict() for t in ticks],
                 "scan_count": state["scan_count"],
                 "feed_modes": state["feed_modes"],
+                "auto_paper": auto.status(),
+                "auto_fills": fills,
             }
         )
         if opps and settings.persist_every_scan:
@@ -178,6 +217,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "scan_count": state["scan_count"],
             "feed_modes": state["feed_modes"],
             "triangular": settings.enable_triangular,
+            "auto_paper": auto.status(),
         }
 
     @app.get("/prices")
@@ -222,6 +262,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "use_websocket_feeds": s.use_websocket_feeds,
             "enable_triangular": s.enable_triangular,
             "feed_modes": state["feed_modes"],
+            "auto_paper_enabled": auto.enabled,
+            "auto_paper_notional_usdt": auto.notional_usdt,
+            "auto_paper_min_net_edge_pct": auto.min_net_edge_pct,
+            "auto_paper_cooldown_seconds": auto.cooldown_seconds,
+            "auto_paper_max_per_scan": auto.max_per_scan,
+            "auto_paper_max_per_minute": auto.max_per_minute,
+            "auto_paper": auto.status(),
         }
 
     @app.patch("/settings")
@@ -246,6 +293,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 feed.symbols = state["feed_symbols"]
         if body.paper_starting_usdt is not None:
             broker.starting_usdt = body.paper_starting_usdt
+        if body.auto_paper_enabled is not None:
+            auto.enabled = body.auto_paper_enabled
+        if body.auto_paper_notional_usdt is not None:
+            auto.notional_usdt = body.auto_paper_notional_usdt
+        if "auto_paper_min_net_edge_pct" in body.model_fields_set:
+            auto.min_net_edge_pct = body.auto_paper_min_net_edge_pct
+        if body.auto_paper_cooldown_seconds is not None:
+            auto.cooldown_seconds = body.auto_paper_cooldown_seconds
+        if body.auto_paper_max_per_scan is not None:
+            auto.max_per_scan = body.auto_paper_max_per_scan
+        if body.auto_paper_max_per_minute is not None:
+            auto.max_per_minute = body.auto_paper_max_per_minute
         await db.set_setting(
             "runtime",
             {
@@ -254,6 +313,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "fees": engine.fee_map,
                 "watched_symbols": state["symbols"],
                 "paper_starting_usdt": broker.starting_usdt,
+                "auto_paper_enabled": auto.enabled,
+                "auto_paper_notional_usdt": auto.notional_usdt,
+                "auto_paper_min_net_edge_pct": auto.min_net_edge_pct,
+                "auto_paper_cooldown_seconds": auto.cooldown_seconds,
+                "auto_paper_max_per_scan": auto.max_per_scan,
+                "auto_paper_max_per_minute": auto.max_per_minute,
             },
         )
         await on_prices_updated()
@@ -316,6 +381,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "prices": [t.to_dict() for t in ticks],
                     "scan_count": state["scan_count"],
                     "feed_modes": state["feed_modes"],
+                    "auto_paper": auto.status(),
+                    "auto_fills": [],
                 }
             )
         )
