@@ -25,6 +25,8 @@ export function Header({ connected, scanCount, lastUpdateAt, autoPaper }: Props)
     if (last?.ok && last.symbol) {
       const pnl = typeof last.pnl_usdt === 'number' ? ` · PnL ${last.pnl_usdt.toFixed(2)}` : ''
       autoLabel = `Auto · ${autoPaper.fills_total} fills · last ${last.symbol}${pnl}`
+    } else if (last?.reason) {
+      autoLabel = `Auto · ${autoPaper.fills_total} fills · ${last.reason}`
     } else {
       autoLabel = `Auto paper ON · ${autoPaper.fills_total} fills`
     }

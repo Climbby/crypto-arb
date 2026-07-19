@@ -39,7 +39,8 @@ export function OpportunityBoard({ opportunities, onExecuted }: Props) {
         <div>
           <h2 className="m-0 text-lg font-medium">Opportunities</h2>
           <p className="m-0 mt-1 text-xs text-[var(--muted)]">
-            Cross-exchange + triangular · inventory-aware paper flags
+            Live edges only · history chart is a diary (not every row is a trade). Auto skips
+            blocked inventory and routes still in cooldown.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3 text-sm text-[var(--muted)]">

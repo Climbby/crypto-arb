@@ -25,9 +25,9 @@ class Settings(BaseSettings):
     auto_paper_notional_usdt: float = 100.0
     # None → use min_net_edge_pct; set higher to be pickier than the board
     auto_paper_min_net_edge_pct: float | None = None
-    auto_paper_cooldown_seconds: float = 45.0
-    auto_paper_max_per_scan: int = 1
-    auto_paper_max_per_minute: int = 8
+    auto_paper_cooldown_seconds: float = 12.0
+    auto_paper_max_per_scan: int = 3
+    auto_paper_max_per_minute: int = 20
     # Persist every opportunity that clears the threshold (24/7 diary)
     persist_every_scan: bool = True
     # Optional path to built frontend (defaults to ../frontend/dist from backend/)

@@ -30,9 +30,9 @@ class AutoPaperTrader:
         enabled: bool = True,
         notional_usdt: float = 100.0,
         min_net_edge_pct: float | None = None,
-        cooldown_seconds: float = 45.0,
-        max_per_scan: int = 1,
-        max_per_minute: int = 8,
+        cooldown_seconds: float = 12.0,
+        max_per_scan: int = 3,
+        max_per_minute: int = 20,
     ) -> None:
         self.broker = broker
         self.enabled = enabled
@@ -83,7 +83,7 @@ class AutoPaperTrader:
             self.skips_total += 1
             self.last_result = {
                 "ok": False,
-                "reason": "max_per_minute",
+                "reason": "rate_limit: max fills/minute reached",
                 "at": time.time(),
             }
             return []
@@ -93,17 +93,33 @@ class AutoPaperTrader:
             if self.min_net_edge_pct is not None
             else scanner_min_edge
         )
-        candidates = [
+
+        blocked = sum(1 for o in opportunities if o.executable is False)
+        eligible = [
             o
             for o in opportunities
             if o.executable is not False
             and o.net_edge_pct >= threshold
             and (o.max_notional_usdt is None or o.max_notional_usdt >= 1.0)
         ]
-        candidates.sort(key=lambda o: o.net_edge_pct, reverse=True)
+        eligible.sort(key=lambda o: o.net_edge_pct, reverse=True)
+
+        if not eligible:
+            if opportunities:
+                self.last_result = {
+                    "ok": False,
+                    "reason": (
+                        f"no_executable: {len(opportunities)} edges shown, "
+                        f"{blocked} blocked by inventory"
+                    ),
+                    "at": time.time(),
+                }
+                self.skips_total += 1
+            return []
 
         fills: list[dict[str, Any]] = []
-        for opp in candidates:
+        cooled = 0
+        for opp in eligible:
             if len(fills) >= self.max_per_scan:
                 break
             if len(self._recent) >= self.max_per_minute:
@@ -111,6 +127,7 @@ class AutoPaperTrader:
 
             last = self._last_fire.get(opp.id, 0.0)
             if now - last < self.cooldown_seconds:
+                cooled += 1
                 continue
 
             size = self.notional_usdt
@@ -170,5 +187,20 @@ class AutoPaperTrader:
             )
             if on_fill:
                 await on_fill(payload)
+
+        if not fills and eligible:
+            self.skips_total += 1
+            if cooled == len(eligible):
+                reason = (
+                    f"cooldown: {cooled} executable edge(s) waiting "
+                    f"{self.cooldown_seconds:.0f}s per route"
+                )
+            else:
+                reason = f"skipped: {cooled} on cooldown, rest failed inventory/size"
+            self.last_result = {
+                "ok": False,
+                "reason": reason,
+                "at": time.time(),
+            }
 
         return fills

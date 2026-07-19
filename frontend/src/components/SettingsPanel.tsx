@@ -17,9 +17,9 @@ export function SettingsPanel({ onSaved }: Props) {
   const [autoEnabled, setAutoEnabled] = useState(true)
   const [autoNotional, setAutoNotional] = useState(100)
   const [autoMinEdge, setAutoMinEdge] = useState('')
-  const [autoCooldown, setAutoCooldown] = useState(45)
-  const [autoMaxScan, setAutoMaxScan] = useState(1)
-  const [autoMaxMin, setAutoMaxMin] = useState(8)
+  const [autoCooldown, setAutoCooldown] = useState(12)
+  const [autoMaxScan, setAutoMaxScan] = useState(3)
+  const [autoMaxMin, setAutoMaxMin] = useState(20)
   const [msg, setMsg] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -38,9 +38,9 @@ export function SettingsPanel({ onSaved }: Props) {
       setAutoMinEdge(
         s.auto_paper_min_net_edge_pct == null ? '' : String(s.auto_paper_min_net_edge_pct),
       )
-      setAutoCooldown(s.auto_paper_cooldown_seconds ?? 45)
-      setAutoMaxScan(s.auto_paper_max_per_scan ?? 1)
-      setAutoMaxMin(s.auto_paper_max_per_minute ?? 8)
+      setAutoCooldown(s.auto_paper_cooldown_seconds ?? 12)
+      setAutoMaxScan(s.auto_paper_max_per_scan ?? 3)
+      setAutoMaxMin(s.auto_paper_max_per_minute ?? 20)
     })
   }, [])
 
