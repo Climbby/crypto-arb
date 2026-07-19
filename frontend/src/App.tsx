@@ -8,8 +8,6 @@ import { SettingsPanel } from './components/SettingsPanel'
 import { TradingViewChart } from './components/TradingViewChart'
 import { useOpportunities } from './hooks/useOpportunities'
 
-const EXCHANGES = ['binance', 'kraken', 'coinbase']
-
 export default function App() {
   const { opportunities, prices, scanCount, connected, lastUpdateAt, feedModes, autoPaper, autoFillSeq } =
     useOpportunities()
@@ -50,7 +48,6 @@ export default function App() {
         <TradingViewChart />
         <PortfolioPanel
           portfolio={portfolio}
-          exchanges={EXCHANGES}
           onChange={refreshPaper}
           refreshKey={historyKey + autoFillSeq}
         />

@@ -14,7 +14,7 @@ export function OpportunityBoard({ opportunities, onExecuted }: Props) {
   const [busyId, setBusyId] = useState<string | null>(null)
   const [notional, setNotional] = useState(100)
   const [error, setError] = useState<string | null>(null)
-  const [showBlocked, setShowBlocked] = useState(true)
+  const [showBlocked, setShowBlocked] = useState(false)
 
   async function execute(opp: Opportunity) {
     setBusyId(opp.id)
@@ -33,14 +33,15 @@ export function OpportunityBoard({ opportunities, onExecuted }: Props) {
     ? opportunities
     : opportunities.filter((o) => o.executable !== false)
 
+  const blockedCount = opportunities.filter((o) => o.executable === false).length
+
   return (
     <section className="rounded-lg border border-[var(--border)] bg-[var(--bg-panel)]/80 p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="m-0 text-lg font-medium">Opportunities</h2>
+          <h2 className="m-0 text-lg font-medium">Live edges</h2>
           <p className="m-0 mt-1 text-xs text-[var(--muted)]">
-            Live edges only · history chart is a diary (not every row is a trade). Auto skips
-            blocked inventory and routes still in cooldown.
+            Edges auto-paper can take right now. Empty = nothing above the min net % after fees.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3 text-sm text-[var(--muted)]">
@@ -50,10 +51,10 @@ export function OpportunityBoard({ opportunities, onExecuted }: Props) {
               checked={showBlocked}
               onChange={(e) => setShowBlocked(e.target.checked)}
             />
-            show blocked
+            show blocked{blockedCount > 0 ? ` (${blockedCount})` : ''}
           </label>
           <label className="flex items-center gap-2">
-            Paper notional (USDT)
+            Manual size (USDT)
             <input
               type="number"
               min={1}
@@ -89,7 +90,9 @@ export function OpportunityBoard({ opportunities, onExecuted }: Props) {
             {rows.length === 0 && (
               <tr>
                 <td colSpan={7} className="py-8 text-center text-[var(--muted)]">
-                  No net-positive edges right now — scanning…
+                  {opportunities.length > 0 && !showBlocked
+                    ? `All ${opportunities.length} live edge(s) are blocked by inventory — enable “show blocked” or wait for auto-rebalance.`
+                    : 'Scanning… no net-positive edges above the fee threshold right now.'}
                 </td>
               </tr>
             )}
@@ -132,9 +135,9 @@ export function OpportunityBoard({ opportunities, onExecuted }: Props) {
                       type="button"
                       disabled={busyId === o.id || blocked}
                       onClick={() => void execute(o)}
-                      className="rounded bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-[#062016] disabled:opacity-40"
+                      className="rounded border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--muted)] hover:text-[var(--text)] disabled:opacity-40"
                     >
-                      {busyId === o.id ? '…' : 'Paper exec'}
+                      {busyId === o.id ? '…' : 'Manual fill'}
                     </button>
                   </td>
                 </tr>

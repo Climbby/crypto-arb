@@ -203,12 +203,16 @@ export const api = {
       body: JSON.stringify(body),
     }),
   getPaper: () => request<Portfolio>('/paper'),
-  getEquity: (limit = 400) =>
-    request<{
+  getEquity: (limit = 400, hours?: number | null) => {
+    const params = new URLSearchParams({ limit: String(limit) })
+    if (hours != null && hours > 0) params.set('hours', String(hours))
+    return request<{
       current: { equity_usdt: number; usdt_total: number; realized_pnl_usdt: number }
       history: EquityPoint[]
+      hours?: number | null
       auto_rebalance?: AppSettings['auto_rebalance']
-    }>(`/paper/equity?limit=${limit}`),
+    }>(`/paper/equity?${params.toString()}`)
+  },
   resetPaper: () => request<Portfolio>('/paper/reset', { method: 'POST' }),
   execute: (opportunity_id: string, notional_usdt: number) =>
     request<{ trade: PaperTrade; portfolio: Portfolio }>('/paper/execute', {

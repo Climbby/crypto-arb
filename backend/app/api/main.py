@@ -395,8 +395,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return await broker.portfolio()
 
     @app.get("/paper/equity")
-    async def paper_equity(limit: int = 400) -> dict[str, Any]:
-        rows = await db.list_equity(limit=min(max(limit, 10), 2000))
+    async def paper_equity(limit: int = 400, hours: float | None = None) -> dict[str, Any]:
+        rows = await db.list_equity(
+            limit=min(max(limit, 10), 2000),
+            hours=hours if hours and hours > 0 else None,
+        )
         ticks = await store.snapshot()
         portfolio = await broker.portfolio()
         equity, cash = mark_equity_usdt(portfolio.get("by_venue", {}), ticks)
@@ -407,6 +410,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "realized_pnl_usdt": float(portfolio.get("realized_pnl_usdt") or 0),
             },
             "history": rows,
+            "hours": hours,
             "auto_rebalance": rebalancer.status(),
         }
 

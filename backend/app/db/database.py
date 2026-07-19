@@ -387,14 +387,29 @@ class Database:
             "recorded_at": now,
         }
 
-    async def list_equity(self, limit: int = 500) -> list[dict[str, Any]]:
-        cur = await self.conn.execute(
-            """
-            SELECT * FROM paper_equity
-            ORDER BY id DESC LIMIT ?
-            """,
-            (limit,),
-        )
+    async def list_equity(
+        self, limit: int = 500, hours: float | None = None
+    ) -> list[dict[str, Any]]:
+        if hours is not None and hours > 0:
+            from datetime import timedelta
+
+            cutoff = (utcnow() - timedelta(hours=hours)).isoformat()
+            cur = await self.conn.execute(
+                """
+                SELECT * FROM paper_equity
+                WHERE recorded_at >= ?
+                ORDER BY id DESC LIMIT ?
+                """,
+                (cutoff, limit),
+            )
+        else:
+            cur = await self.conn.execute(
+                """
+                SELECT * FROM paper_equity
+                ORDER BY id DESC LIMIT ?
+                """,
+                (limit,),
+            )
         rows = await cur.fetchall()
         # chronological for charts
         return list(reversed([dict(r) for r in rows]))

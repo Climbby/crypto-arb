@@ -4,26 +4,29 @@ import { HoverLineChart, type ChartDatum } from './HoverLineChart'
 
 type Props = {
   portfolio: Portfolio | null
-  exchanges: string[]
   onChange: () => void
   refreshKey?: number
 }
 
-export function PortfolioPanel({ portfolio, exchanges, onChange, refreshKey = 0 }: Props) {
-  const [asset, setAsset] = useState('USDT')
-  const [fromVenue, setFromVenue] = useState(exchanges[0] ?? 'binance')
-  const [toVenue, setToVenue] = useState(exchanges[1] ?? 'kraken')
-  const [amount, setAmount] = useState(100)
-  const [delayed, setDelayed] = useState(false)
+const EQUITY_RANGES: { label: string; hours: number | null }[] = [
+  { label: '1h', hours: 1 },
+  { label: '6h', hours: 6 },
+  { label: '24h', hours: 24 },
+  { label: '7d', hours: 168 },
+  { label: 'All', hours: null },
+]
+
+export function PortfolioPanel({ portfolio, onChange, refreshKey = 0 }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [equityNow, setEquityNow] = useState<number | null>(null)
   const [equityHist, setEquityHist] = useState<EquityPoint[]>([])
   const [rebalanceNote, setRebalanceNote] = useState<string | null>(null)
+  const [hours, setHours] = useState<number | null>(24)
 
   useEffect(() => {
     void api
-      .getEquity(400)
+      .getEquity(400, hours)
       .then((r) => {
         setEquityNow(r.current.equity_usdt)
         setEquityHist(r.history)
@@ -43,7 +46,7 @@ export function PortfolioPanel({ portfolio, exchanges, onChange, refreshKey = 0 
       .catch(() => {
         /* ignore */
       })
-  }, [refreshKey, portfolio?.realized_pnl_usdt, portfolio?.trades.length])
+  }, [refreshKey, hours, portfolio?.realized_pnl_usdt, portfolio?.trades.length])
 
   const chartMeta = useMemo(() => {
     if (equityHist.length < 2) return null
@@ -79,27 +82,9 @@ export function PortfolioPanel({ portfolio, exchanges, onChange, refreshKey = 0 
     }
   }
 
-  async function transfer() {
-    setBusy(true)
-    setError(null)
-    try {
-      await api.transfer({
-        asset,
-        from_venue: fromVenue,
-        to_venue: toVenue,
-        amount,
-        delayed,
-      })
-      onChange()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const equityDelta =
-    chartMeta == null ? null : chartMeta.end - chartMeta.start
+  const equityDelta = chartMeta == null ? null : chartMeta.end - chartMeta.start
+  const rangeLabel =
+    hours == null ? 'all time' : hours === 168 ? 'last 7d' : `last ${hours}h`
 
   return (
     <section className="rounded-lg border border-[var(--border)] bg-[var(--bg-panel)]/80 p-4">
@@ -135,14 +120,32 @@ export function PortfolioPanel({ portfolio, exchanges, onChange, refreshKey = 0 
       )}
 
       <div className="mb-4 rounded border border-[var(--border)]/80 bg-[var(--bg)]/40 p-3">
-        <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <h3 className="m-0 text-sm font-medium">Equity over time</h3>
-          <p className="m-0 text-xs text-[var(--muted)]">
-            {chartMeta
-              ? `${chartMeta.min.toFixed(0)} → ${chartMeta.max.toFixed(0)} · Δ ${equityDelta! >= 0 ? '+' : ''}${equityDelta!.toFixed(2)}`
-              : 'Building history…'}
-          </p>
+          <div className="flex flex-wrap gap-1">
+            {EQUITY_RANGES.map((r) => (
+              <button
+                key={r.label}
+                type="button"
+                onClick={() => setHours(r.hours)}
+                className={`rounded px-2 py-0.5 text-xs ${
+                  hours === r.hours
+                    ? 'bg-[var(--accent)] text-[#062016]'
+                    : 'border border-[var(--border)] text-[var(--muted)] hover:text-[var(--text)]'
+                }`}
+              >
+                {r.label}
+              </button>
+            ))}
+          </div>
         </div>
+        <p className="m-0 mb-2 text-xs text-[var(--muted)]">
+          Showing {rangeLabel} · {equityHist.length} point
+          {equityHist.length === 1 ? '' : 's'}
+          {chartMeta
+            ? ` · ${chartMeta.min.toFixed(0)} → ${chartMeta.max.toFixed(0)} · Δ ${equityDelta! >= 0 ? '+' : ''}${equityDelta!.toFixed(2)}`
+            : ''}
+        </p>
         {equityData.length >= 2 ? (
           <HoverLineChart
             data={equityData}
@@ -151,7 +154,8 @@ export function PortfolioPanel({ portfolio, exchanges, onChange, refreshKey = 0 
           />
         ) : (
           <p className="m-0 text-sm text-[var(--muted)]">
-            Equity curve starts after the first fills / rebalances (or a short heartbeat).
+            Not enough equity snapshots in this window yet — try a wider range or wait for the next
+            fill / heartbeat.
           </p>
         )}
         {rebalanceNote && (
@@ -173,74 +177,6 @@ export function PortfolioPanel({ portfolio, exchanges, onChange, refreshKey = 0 
             </ul>
           </div>
         ))}
-      </div>
-
-      <div className="mb-4 rounded border border-[var(--border)]/80 p-3">
-        <p className="m-0 mb-2 text-sm font-medium">Manual rebalance transfer</p>
-        <div className="flex flex-wrap gap-2 text-sm">
-          <select
-            value={asset}
-            onChange={(e) => setAsset(e.target.value)}
-            className="rounded border border-[var(--border)] bg-[var(--bg)] px-2 py-1"
-          >
-            {['USDT', 'BTC', 'ETH', 'SOL'].map((a) => (
-              <option key={a} value={a}>
-                {a}
-              </option>
-            ))}
-          </select>
-          <select
-            value={fromVenue}
-            onChange={(e) => setFromVenue(e.target.value)}
-            className="rounded border border-[var(--border)] bg-[var(--bg)] px-2 py-1"
-          >
-            {exchanges.map((e) => (
-              <option key={e} value={e}>
-                {e}
-              </option>
-            ))}
-          </select>
-          <span className="self-center text-[var(--muted)]">→</span>
-          <select
-            value={toVenue}
-            onChange={(e) => setToVenue(e.target.value)}
-            className="rounded border border-[var(--border)] bg-[var(--bg)] px-2 py-1"
-          >
-            {exchanges.map((e) => (
-              <option key={e} value={e}>
-                {e}
-              </option>
-            ))}
-          </select>
-          <input
-            type="number"
-            min={0}
-            step="any"
-            value={amount}
-            onChange={(e) => setAmount(Number(e.target.value))}
-            className="w-28 rounded border border-[var(--border)] bg-[var(--bg)] px-2 py-1"
-          />
-          <label className="flex items-center gap-1.5 text-[var(--muted)]">
-            <input
-              type="checkbox"
-              checked={delayed}
-              onChange={(e) => setDelayed(e.target.checked)}
-            />
-            delayed flag
-          </label>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void transfer()}
-            className="rounded bg-[var(--sell)] px-3 py-1.5 font-medium text-[#0a1624] disabled:opacity-50"
-          >
-            Transfer
-          </button>
-        </div>
-        <p className="mt-2 text-xs text-[var(--muted)]">
-          Auto-rebalance runs when an edge is blocked by inventory. Manual transfer is still
-          available; paper moves are instant (delayed is a flag only).
-        </p>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -277,6 +213,9 @@ export function PortfolioPanel({ portfolio, exchanges, onChange, refreshKey = 0 
         </div>
         <div>
           <h3 className="m-0 mb-2 text-sm font-medium text-[var(--muted)]">Transfer log</h3>
+          <p className="m-0 mb-2 text-xs text-[var(--muted)]">
+            Auto-rebalance moves when a venue is short for an edge.
+          </p>
           <div className="max-h-48 overflow-auto text-sm">
             {(portfolio?.transfers.length ?? 0) === 0 ? (
               <p className="text-[var(--muted)]">No transfers yet.</p>
@@ -297,7 +236,7 @@ export function PortfolioPanel({ portfolio, exchanges, onChange, refreshKey = 0 
                       </td>
                       <td className="py-1.5">
                         {t.asset} · {t.from_venue}→{t.to_venue}
-                        {t.delayed ? ' · auto/delayed' : ''}
+                        {t.delayed ? ' · auto' : ''}
                       </td>
                       <td className="py-1.5">{Number(t.amount).toFixed(6)}</td>
                     </tr>
