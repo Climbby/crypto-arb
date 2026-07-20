@@ -30,15 +30,17 @@ function groupTopEdges(
 ): TopEdgeRow[] {
   const map = new Map<string, TopEdgeRow>()
   for (const h of top) {
-    const key = `${h.symbol}|${h.buy_exchange}|${h.sell_exchange}`
+    // Only collapse exact duplicates: same route AND same displayed net %
+    const netKey = h.net_edge_pct.toFixed(3)
+    const key = `${h.symbol}|${h.buy_exchange}|${h.sell_exchange}|${netKey}`
     const existing = map.get(key)
     if (!existing) {
       map.set(key, { ...h, count: 1 })
       continue
     }
     existing.count += 1
-    if (h.net_edge_pct > existing.net_edge_pct) {
-      existing.net_edge_pct = h.net_edge_pct
+    // Keep the most recent timestamp for the group
+    if (h.recorded_at > existing.recorded_at) {
       existing.recorded_at = h.recorded_at
     }
   }
