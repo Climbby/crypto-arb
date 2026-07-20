@@ -87,7 +87,7 @@ class AutoRebalancer:
         for opp in blocked:
             if len(done) >= self.max_transfers_per_scan:
                 break
-            needs = self._needs(opp, by_venue, fee_map)
+            needs = self._needs(opp, by_venue, fee_map, pending=portfolio.get("pending_transfers"))
             for asset, to_venue, amount in needs:
                 if len(done) >= self.max_transfers_per_scan:
                     break
@@ -98,6 +98,9 @@ class AutoRebalancer:
                     continue
                 by_venue, payload = moved
                 done.append(payload)
+                # Refresh pending view after each send
+                portfolio = await self.broker.portfolio()
+                by_venue = portfolio.get("by_venue", by_venue)
 
         # 2) Proactive: top up venues below coin floors from surplus donors
         if len(done) < self.max_transfers_per_scan:
@@ -120,13 +123,15 @@ class AutoRebalancer:
         budget: int,
     ) -> list[dict[str, Any]]:
         done: list[dict[str, Any]] = []
+        portfolio = await self.broker.portfolio()
+        inbound = self._pending_inbound(portfolio.get("pending_transfers") or [])
         for venue, assets in list(by_venue.items()):
             if len(done) >= budget:
                 break
             for coin, floor in self.coin_floors.items():
                 if len(done) >= budget:
                     break
-                have = float(assets.get(coin, 0.0))
+                have = float(assets.get(coin, 0.0)) + inbound.get((venue, coin), 0.0)
                 if have >= floor:
                     continue
                 need = floor - have
@@ -138,6 +143,9 @@ class AutoRebalancer:
                 by_venue, payload = moved
                 payload["reason"] = f"floor top-up {coin} on {venue}"
                 done.append(payload)
+                portfolio = await self.broker.portfolio()
+                by_venue = portfolio.get("by_venue", by_venue)
+                inbound = self._pending_inbound(portfolio.get("pending_transfers") or [])
         return done
 
     async def _try_transfer(
@@ -157,13 +165,20 @@ class AutoRebalancer:
         if donor is None:
             return None
         available = float(by_venue.get(donor, {}).get(asset, 0.0))
+        from app.paper.transfer_realism import withdraw_fee_for
+
+        fee = withdraw_fee_for(asset)
         if asset == "USDT":
-            send = min(amount, available - self.leave_usdt_reserve, self.usdt_chunk)
+            send = min(
+                amount,
+                available - self.leave_usdt_reserve - fee,
+                self.usdt_chunk,
+            )
         else:
             # Leave donor above its own floor when possible
             donor_floor = float(self.coin_floors.get(asset, 0.0))
-            spare = max(0.0, available - donor_floor)
-            send = min(amount, spare if spare > 0 else available * 0.5)
+            spare = max(0.0, available - donor_floor - fee)
+            send = min(amount, spare if spare > 0 else max(0.0, available * 0.5 - fee))
         if send < (1.0 if asset == "USDT" else 1e-6):
             return None
         try:
@@ -213,15 +228,18 @@ class AutoRebalancer:
         opp: Opportunity,
         by_venue: dict[str, dict[str, float]],
         fee_map: dict[str, float],
+        pending: list[dict[str, Any]] | None = None,
     ) -> list[tuple[str, str, float]]:
         """Return list of (asset, to_venue, amount_needed)."""
         needs: list[tuple[str, str, float]] = []
         notional = self.notional_usdt
+        inbound = self._pending_inbound(pending or [])
 
         if opp.kind == "triangular":
             fee = fee_map.get(opp.buy_exchange, 0.001)
             want = notional * (1 + fee) * 1.05
             have = float(by_venue.get(opp.buy_exchange, {}).get("USDT", 0.0))
+            have += inbound.get((opp.buy_exchange, "USDT"), 0.0)
             if have < want:
                 needs.append(("USDT", opp.buy_exchange, want - have))
             return needs
@@ -230,6 +248,7 @@ class AutoRebalancer:
         buy_fee = fee_map.get(opp.buy_exchange, 0.001)
         want_usdt = notional * (1 + buy_fee) * 1.05
         have_usdt = float(by_venue.get(opp.buy_exchange, {}).get("USDT", 0.0))
+        have_usdt += inbound.get((opp.buy_exchange, "USDT"), 0.0)
         if have_usdt < want_usdt:
             needs.append(("USDT", opp.buy_exchange, want_usdt - have_usdt))
 
@@ -239,9 +258,23 @@ class AutoRebalancer:
         floor = float(self.coin_floors.get(base, 0.0))
         want_coin = max(want_coin, floor)
         have_coin = float(by_venue.get(opp.sell_exchange, {}).get(base, 0.0))
+        have_coin += inbound.get((opp.sell_exchange, base), 0.0)
         if have_coin < want_coin:
             needs.append((base, opp.sell_exchange, want_coin - have_coin))
         return needs
+
+    @staticmethod
+    def _pending_inbound(pending: list[dict[str, Any]]) -> dict[tuple[str, str], float]:
+        out: dict[tuple[str, str], float] = {}
+        for row in pending:
+            if str(row.get("status") or "") != "pending":
+                continue
+            key = (str(row["to_venue"]), str(row["asset"]))
+            net = float(
+                row["net_amount"] if row.get("net_amount") is not None else row["amount"]
+            )
+            out[key] = out.get(key, 0.0) + net
+        return out
 
     @staticmethod
     def _richest(

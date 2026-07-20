@@ -46,7 +46,8 @@ class TransferRequest(BaseModel):
     from_venue: str
     to_venue: str
     amount: float = Field(gt=0)
-    delayed: bool = False
+    delayed: bool = True
+    instant: bool = False
 
 
 class SettingsUpdate(BaseModel):
@@ -172,6 +173,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         portfolio = await broker.portfolio()
         by_venue = portfolio.get("by_venue", {})
         equity, cash = mark_equity_usdt(by_venue, ticks)
+        # In-transit net amounts still belong to the paper book
+        px = mid_prices_usdt(ticks)
+        for asset, amt in (portfolio.get("in_transit") or {}).items():
+            if asset == "USDT":
+                equity += float(amt)
+                cash += float(amt)
+            elif asset in px:
+                equity += float(amt) * px[asset]
         by_eq = mark_equity_by_venue(by_venue, ticks)
         return await db.record_equity(
             equity_usdt=equity,
@@ -216,7 +225,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         fills: list[dict[str, Any]] = []
         transfers: list[dict[str, Any]] = []
+        settled: list[dict[str, Any]] = []
         async with auto_lock:
+            settled = await broker.settle_due_transfers()
+            if settled:
+                opps = await annotate(opps)
+                state["last_opps"] = opps
             # First move inventory toward blocked edges, then try to fill
             transfers = await rebalancer.maybe_rebalance(
                 opps,
@@ -233,10 +247,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 scanner_min_edge=engine.min_net_edge_pct,
                 ticks=ticks,
             )
-        if fills or transfers:
+        if fills or transfers or settled:
             opps = await annotate(opps)
             state["last_opps"] = opps
             note = "fill" if fills else "rebalance"
+            if settled and not fills and not transfers:
+                note = "settle"
             if fills and transfers:
                 note = "fill+rebalance"
             await snapshot_equity(ticks, note=note)
@@ -535,6 +551,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 to_venue=body.to_venue.lower(),
                 amount=body.amount,
                 delayed=body.delayed,
+                instant=body.instant,
             )
         except PaperBrokerError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc

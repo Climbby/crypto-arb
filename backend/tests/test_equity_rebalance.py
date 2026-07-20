@@ -141,7 +141,13 @@ async def test_auto_rebalance_moves_usdt(tmp_path):
         db=db, venues=["binance", "kraken", "coinbase"], starting_usdt=9_000.0
     )
     await broker.reset()
-    await broker.transfer(asset="USDT", from_venue="kraken", to_venue="binance", amount=2900.0)
+    await broker.transfer(
+        asset="USDT",
+        from_venue="kraken",
+        to_venue="binance",
+        amount=2900.0,
+        instant=True,
+    )
 
     rebalancer = AutoRebalancer(
         broker,
@@ -169,6 +175,7 @@ async def test_auto_rebalance_moves_usdt(tmp_path):
         max_notional_usdt=0.0,
     )
     before = (await broker.portfolio())["by_venue"]["kraken"]["USDT"]
+    donor_before = (await broker.portfolio())["by_venue"]["binance"]["USDT"]
     transfers = await rebalancer.maybe_rebalance(
         [opp],
         fee_map={"binance": 0.001, "kraken": 0.0026},
@@ -177,8 +184,12 @@ async def test_auto_rebalance_moves_usdt(tmp_path):
     assert len(transfers) >= 1
     usdt_moves = [t for t in transfers if t["asset"] == "USDT" and t["to_venue"] == "kraken"]
     assert len(usdt_moves) == 1
-    after = (await broker.portfolio())["by_venue"]["kraken"]["USDT"]
-    assert after > before
+    portfolio = await broker.portfolio()
+    # Destination not credited until settle; funds are in transit
+    assert portfolio["by_venue"]["kraken"]["USDT"] == pytest.approx(before)
+    assert portfolio["by_venue"]["binance"]["USDT"] < donor_before
+    assert portfolio["in_transit"].get("USDT", 0) > 0
+    assert usdt_moves[0]["transfer"]["status"] == "pending"
     await db.close()
 
 

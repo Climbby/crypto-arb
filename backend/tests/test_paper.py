@@ -43,7 +43,7 @@ async def test_execute_and_pnl(broker: PaperBroker):
     )
     fee_map = {"binance": 0.001, "kraken": 0.001}
     # Seed BTC is 0.05 — keep notional within inventory
-    result = await broker.execute(opp, notional_usdt=5.0, fee_map=fee_map)
+    result = await broker.execute(opp, notional_usdt=5.0, fee_map=fee_map, slippage_bps=0.0)
     trade = result["trade"]
     assert trade["quantity"] == pytest.approx(0.05)
     assert trade["pnl_usdt"] > 0
@@ -98,11 +98,46 @@ async def test_insufficient_funds(broker: PaperBroker):
 @pytest.mark.asyncio
 async def test_transfer(broker: PaperBroker):
     result = await broker.transfer(
-        asset="USDT", from_venue="binance", to_venue="kraken", amount=100.0, delayed=True
+        asset="USDT",
+        from_venue="binance",
+        to_venue="kraken",
+        amount=100.0,
+        instant=True,
     )
-    assert result["transfer"]["delayed"] is True
-    assert result["portfolio"]["by_venue"]["binance"]["USDT"] == pytest.approx(4900.0)
+    assert result["transfer"]["status"] == "settled"
+    assert result["transfer"]["fee_amount"] == pytest.approx(1.0)
+    # Debit 101 (100 + 1 fee); credit 100
+    assert result["portfolio"]["by_venue"]["binance"]["USDT"] == pytest.approx(4899.0)
     assert result["portfolio"]["by_venue"]["kraken"]["USDT"] == pytest.approx(5100.0)
+
+
+@pytest.mark.asyncio
+async def test_transfer_pending_then_settle(broker: PaperBroker):
+    result = await broker.transfer(
+        asset="USDT",
+        from_venue="binance",
+        to_venue="kraken",
+        amount=50.0,
+        delayed=True,
+    )
+    assert result["transfer"]["status"] == "pending"
+    assert result["portfolio"]["by_venue"]["binance"]["USDT"] == pytest.approx(4949.0)
+    # Not credited yet
+    assert result["portfolio"]["by_venue"]["kraken"]["USDT"] == pytest.approx(5000.0)
+    assert result["portfolio"]["in_transit"]["USDT"] == pytest.approx(50.0)
+
+    # Force due by rewriting arrives_at
+    tid = int(result["transfer"]["id"])
+    await broker.db.conn.execute(
+        "UPDATE paper_transfers SET arrives_at = ? WHERE id = ?",
+        ("2000-01-01T00:00:00+00:00", tid),
+    )
+    await broker.db.conn.commit()
+    settled = await broker.settle_due_transfers()
+    assert len(settled) == 1
+    portfolio = await broker.portfolio()
+    assert portfolio["by_venue"]["kraken"]["USDT"] == pytest.approx(5050.0)
+    assert portfolio.get("in_transit", {}).get("USDT", 0) == pytest.approx(0.0)
 
 
 @pytest.mark.asyncio

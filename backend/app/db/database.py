@@ -53,7 +53,12 @@ CREATE TABLE IF NOT EXISTS paper_transfers (
     to_venue TEXT NOT NULL,
     amount REAL NOT NULL,
     delayed INTEGER NOT NULL DEFAULT 0,
-    transferred_at TEXT NOT NULL
+    transferred_at TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'settled',
+    fee_amount REAL NOT NULL DEFAULT 0,
+    net_amount REAL,
+    arrives_at TEXT,
+    settled_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS paper_equity (
@@ -93,6 +98,32 @@ class Database:
             await self.conn.execute(
                 "ALTER TABLE paper_equity ADD COLUMN by_venue_json TEXT"
             )
+
+        cur = await self.conn.execute("PRAGMA table_info(paper_transfers)")
+        tcols = {str(r["name"]) for r in await cur.fetchall()}
+        alterations = {
+            "status": "TEXT NOT NULL DEFAULT 'settled'",
+            "fee_amount": "REAL NOT NULL DEFAULT 0",
+            "net_amount": "REAL",
+            "arrives_at": "TEXT",
+            "settled_at": "TEXT",
+        }
+        for name, decl in alterations.items():
+            if name not in tcols:
+                await self.conn.execute(
+                    f"ALTER TABLE paper_transfers ADD COLUMN {name} {decl}"
+                )
+        # Backfill legacy instant rows
+        await self.conn.execute(
+            """
+            UPDATE paper_transfers
+            SET status = 'settled',
+                net_amount = COALESCE(net_amount, amount),
+                fee_amount = COALESCE(fee_amount, 0),
+                settled_at = COALESCE(settled_at, transferred_at)
+            WHERE status IS NULL OR status = '' OR net_amount IS NULL
+            """
+        )
 
     async def close(self) -> None:
         if self._conn:
@@ -388,15 +419,35 @@ class Database:
         to_venue: str,
         amount: float,
         delayed: bool,
+        fee_amount: float = 0.0,
+        net_amount: float | None = None,
+        status: str = "settled",
+        arrives_at: str | None = None,
+        settled_at: str | None = None,
     ) -> dict[str, Any]:
         now = utcnow().isoformat()
+        net = float(amount if net_amount is None else net_amount)
+        settled = settled_at if settled_at is not None else (now if status == "settled" else None)
         cur = await self.conn.execute(
             """
             INSERT INTO paper_transfers
-            (asset, from_venue, to_venue, amount, delayed, transferred_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            (asset, from_venue, to_venue, amount, delayed, transferred_at,
+             status, fee_amount, net_amount, arrives_at, settled_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (asset, from_venue, to_venue, amount, 1 if delayed else 0, now),
+            (
+                asset,
+                from_venue,
+                to_venue,
+                amount,
+                1 if delayed else 0,
+                now,
+                status,
+                fee_amount,
+                net,
+                arrives_at,
+                settled,
+            ),
         )
         await self.conn.commit()
         return {
@@ -407,6 +458,11 @@ class Database:
             "amount": amount,
             "delayed": delayed,
             "transferred_at": now,
+            "status": status,
+            "fee_amount": fee_amount,
+            "net_amount": net,
+            "arrives_at": arrives_at,
+            "settled_at": settled,
         }
 
     async def list_transfers(self, limit: int = 50) -> list[dict[str, Any]]:
@@ -415,6 +471,40 @@ class Database:
         )
         rows = await cur.fetchall()
         return [dict(r) for r in rows]
+
+    async def list_pending_transfers(self) -> list[dict[str, Any]]:
+        cur = await self.conn.execute(
+            """
+            SELECT * FROM paper_transfers
+            WHERE status = 'pending'
+            ORDER BY arrives_at ASC, id ASC
+            """
+        )
+        rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    async def list_due_pending_transfers(self, now_iso: str) -> list[dict[str, Any]]:
+        cur = await self.conn.execute(
+            """
+            SELECT * FROM paper_transfers
+            WHERE status = 'pending' AND arrives_at IS NOT NULL AND arrives_at <= ?
+            ORDER BY arrives_at ASC, id ASC
+            """,
+            (now_iso,),
+        )
+        rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    async def mark_transfer_settled(self, transfer_id: int, settled_at: str) -> None:
+        await self.conn.execute(
+            """
+            UPDATE paper_transfers
+            SET status = 'settled', settled_at = ?
+            WHERE id = ? AND status = 'pending'
+            """,
+            (settled_at, transfer_id),
+        )
+        await self.conn.commit()
 
     async def clear_transfers(self) -> None:
         await self.conn.execute("DELETE FROM paper_transfers")

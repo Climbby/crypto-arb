@@ -282,25 +282,43 @@ export function PortfolioPanel({ portfolio, onChange: _onChange, refreshKey = 0 
                     <th className="py-1 font-medium">Time</th>
                     <th className="py-1 font-medium">Move</th>
                     <th className="py-1 font-medium">Amount</th>
+                    <th className="py-1 font-medium">Status</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {transfers.map((t) => (
-                    <tr key={t.id} className="border-t border-[var(--border)]/50">
-                      <td className="py-1.5 text-[var(--muted)]">
-                        {new Date(t.transferred_at).toLocaleTimeString()}
-                      </td>
-                      <td className="py-1.5">
-                        {t.asset} · {t.from_venue}→{t.to_venue}
-                        {t.delayed ? ' · auto' : ''}
-                      </td>
-                      <td className="py-1.5">{Number(t.amount).toFixed(6)}</td>
-                    </tr>
-                  ))}
+                  {transfers.map((t) => {
+                    const pending = t.status === 'pending'
+                    const net = t.net_amount ?? t.amount
+                    return (
+                      <tr key={t.id} className="border-t border-[var(--border)]/50">
+                        <td className="py-1.5 text-[var(--muted)]">
+                          {new Date(t.transferred_at).toLocaleTimeString()}
+                        </td>
+                        <td className="py-1.5">
+                          {t.asset} · {t.from_venue}→{t.to_venue}
+                          {t.fee_amount ? ` · fee ${Number(t.fee_amount).toPrecision(4)}` : ''}
+                        </td>
+                        <td className="py-1.5">{Number(net).toFixed(6)}</td>
+                        <td className="py-1.5 text-[var(--muted)]">
+                          {pending
+                            ? `in transit${t.arrives_at ? ` · ETA ${new Date(t.arrives_at).toLocaleTimeString()}` : ''}`
+                            : 'settled'}
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             )}
           </div>
+          {portfolio?.in_transit && Object.keys(portfolio.in_transit).length > 0 ? (
+            <p className="m-0 mt-2 text-xs text-[var(--muted)]">
+              In transit:{' '}
+              {Object.entries(portfolio.in_transit)
+                .map(([a, v]) => `${a} ${Number(v).toPrecision(6)}`)
+                .join(' · ')}
+            </p>
+          ) : null}
         </div>
       </div>
     </section>

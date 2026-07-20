@@ -68,6 +68,11 @@ export type PaperTransfer = {
   amount: number
   delayed: number | boolean
   transferred_at: string
+  status?: string
+  fee_amount?: number
+  net_amount?: number | null
+  arrives_at?: string | null
+  settled_at?: string | null
 }
 
 export type Portfolio = {
@@ -75,6 +80,8 @@ export type Portfolio = {
   by_venue: Record<string, Record<string, number>>
   trades: PaperTrade[]
   transfers: PaperTransfer[]
+  pending_transfers?: PaperTransfer[]
+  in_transit?: Record<string, number>
   realized_pnl_usdt: number
   starting_usdt: number
   note: string

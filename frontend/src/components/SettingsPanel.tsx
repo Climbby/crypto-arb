@@ -23,7 +23,7 @@ export function SettingsPanel({ onSaved }: Props) {
   const [autoMaxScan, setAutoMaxScan] = useState(3)
   const [autoMaxMin, setAutoMaxMin] = useState(20)
   const [rebalanceEnabled, setRebalanceEnabled] = useState(true)
-  const [rebalanceCooldown, setRebalanceCooldown] = useState(20)
+  const [rebalanceCooldown, setRebalanceCooldown] = useState(180)
   const [rebalanceChunk, setRebalanceChunk] = useState(500)
   const [msg, setMsg] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)

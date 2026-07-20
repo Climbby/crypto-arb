@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any
 
 from app.db.database import Database
-from app.models import Opportunity
+from app.models import Opportunity, utcnow
+from app.paper.transfer_realism import delay_seconds_for, withdraw_fee_for
 
 
 class PaperBrokerError(Exception):
@@ -58,22 +60,51 @@ class PaperBroker:
         balances = await self.db.get_balances()
         trades = await self.db.list_trades(limit=100)
         transfers = await self.db.list_transfers(limit=50)
+        pending = await self.db.list_pending_transfers()
         realized_pnl = await self.db.sum_trade_pnl_usdt()
         by_venue: dict[str, dict[str, float]] = {}
         for row in balances:
             by_venue.setdefault(row["venue"], {})[row["asset"]] = float(row["amount"])
+        in_transit: dict[str, float] = {}
+        for row in pending:
+            asset = str(row["asset"])
+            in_transit[asset] = in_transit.get(asset, 0.0) + float(
+                row.get("net_amount") if row.get("net_amount") is not None else row["amount"]
+            )
         return {
             "balances": balances,
             "by_venue": by_venue,
             "trades": trades,
             "transfers": transfers,
+            "pending_transfers": pending,
+            "in_transit": in_transit,
             "realized_pnl_usdt": realized_pnl,
             "starting_usdt": self.starting_usdt,
             "note": (
-                "Paper fills are theoretical: no latency, depth, or transfer delay "
-                "unless you use the rebalance helper with delayed=true (flag only)."
+                "Paper mode: fills include modeled fees + slippage; "
+                "cross-venue transfers debit immediately, credit after delay, "
+                "and burn a withdrawal fee while in transit."
             ),
         }
+
+    async def settle_due_transfers(self) -> list[dict[str, Any]]:
+        """Credit destinations for transfers whose arrives_at has passed."""
+        now = utcnow()
+        due = await self.db.list_due_pending_transfers(now.isoformat())
+        settled: list[dict[str, Any]] = []
+        for row in due:
+            asset = str(row["asset"])
+            to_venue = str(row["to_venue"])
+            net = float(
+                row["net_amount"] if row.get("net_amount") is not None else row["amount"]
+            )
+            bal = await self._balance_map()
+            dest = bal.get((to_venue, asset), 0.0) + net
+            await self.db.set_balance(to_venue, asset, dest)
+            settled_at = now.isoformat()
+            await self.db.mark_transfer_settled(int(row["id"]), settled_at)
+            settled.append({**dict(row), "status": "settled", "settled_at": settled_at})
+        return settled
 
     async def execute(
         self,
@@ -99,25 +130,34 @@ class PaperBroker:
             return await self._execute_triangular(
                 opportunity, notional_usdt, fee_map, book, slippage_bps
             )
-        return await self._execute_cross(opportunity, notional_usdt, fee_map)
+        return await self._execute_cross(
+            opportunity, notional_usdt, fee_map, slippage_bps=slippage_bps
+        )
 
     async def _execute_cross(
         self,
         opportunity: Opportunity,
         notional_usdt: float,
         fee_map: dict[str, float],
+        *,
+        slippage_bps: float = 5.0,
     ) -> dict[str, Any]:
         buy_fee = fee_map.get(opportunity.buy_exchange, 0.001)
         sell_fee = fee_map.get(opportunity.sell_exchange, 0.001)
+        slip = max(0.0, float(slippage_bps)) / 10_000.0
 
-        # Buy leg: spend USDT on buy exchange at ask
+        # Worsen execution vs quoted top-of-book (pay more to buy, receive less to sell)
+        buy_price = float(opportunity.buy_price) * (1.0 + slip)
+        sell_price = float(opportunity.sell_price) * (1.0 - slip)
+        if buy_price <= 0 or sell_price <= 0:
+            raise PaperBrokerError("invalid prices after slippage")
+
         buy_cost = notional_usdt
-        quantity = buy_cost / opportunity.buy_price
+        quantity = buy_cost / buy_price
         buy_fee_usdt = buy_cost * buy_fee
         total_usdt_out = buy_cost + buy_fee_usdt
 
-        # Sell leg: sell quantity at bid, pay fee on proceeds
-        sell_proceeds = quantity * opportunity.sell_price
+        sell_proceeds = quantity * sell_price
         sell_fee_usdt = sell_proceeds * sell_fee
         net_usdt_in = sell_proceeds - sell_fee_usdt
 
@@ -138,7 +178,6 @@ class PaperBroker:
                 "Use paper transfer to rebalance inventory."
             )
 
-        # Apply: buy venue loses USDT, gains base; sell venue loses base, gains USDT
         new_buy_usdt = buy_usdt - total_usdt_out
         new_buy_coin = bal.get((opportunity.buy_exchange, base), 0.0) + quantity
         new_sell_coin = sell_coin - quantity
@@ -156,8 +195,8 @@ class PaperBroker:
             buy_exchange=opportunity.buy_exchange,
             sell_exchange=opportunity.sell_exchange,
             quantity=quantity,
-            buy_price=opportunity.buy_price,
-            sell_price=opportunity.sell_price,
+            buy_price=buy_price,
+            sell_price=sell_price,
             net_edge_pct=opportunity.net_edge_pct,
             pnl_usdt=pnl,
         )
@@ -228,8 +267,16 @@ class PaperBroker:
         from_venue: str,
         to_venue: str,
         amount: float,
-        delayed: bool = False,
+        delayed: bool = True,
+        instant: bool = False,
     ) -> dict[str, Any]:
+        """
+        Move inventory between venues.
+
+        `amount` is what the destination should receive. Source is debited
+        amount + withdrawal fee immediately. Destination is credited after a
+        realistic delay (unless instant=True for tests).
+        """
         if amount <= 0:
             raise PaperBrokerError("amount must be positive")
         if from_venue == to_venue:
@@ -237,30 +284,62 @@ class PaperBroker:
         if from_venue not in self.venues or to_venue not in self.venues:
             raise PaperBrokerError("unknown venue")
 
+        fee = withdraw_fee_for(asset)
+        debit = amount + fee
         bal = await self._balance_map()
         available = bal.get((from_venue, asset), 0.0)
-        if available < amount:
+        if available < debit:
             raise PaperBrokerError(
-                f"Insufficient {asset} on {from_venue}: need {amount}, have {available}"
+                f"Insufficient {asset} on {from_venue}: need {debit} "
+                f"(incl. withdraw fee {fee}), have {available}"
             )
 
-        await self.db.set_balance(from_venue, asset, available - amount)
-        dest = bal.get((to_venue, asset), 0.0) + amount
-        await self.db.set_balance(to_venue, asset, dest)
-        record = await self.db.insert_transfer(
-            asset=asset,
-            from_venue=from_venue,
-            to_venue=to_venue,
-            amount=amount,
-            delayed=delayed,
-        )
+        await self.db.set_balance(from_venue, asset, available - debit)
+
+        use_delay = delayed and not instant
+        now = utcnow()
+        if use_delay:
+            delay_s = delay_seconds_for(asset)
+            arrives = (now + timedelta(seconds=delay_s)).isoformat()
+            record = await self.db.insert_transfer(
+                asset=asset,
+                from_venue=from_venue,
+                to_venue=to_venue,
+                amount=debit,
+                delayed=True,
+                fee_amount=fee,
+                net_amount=amount,
+                status="pending",
+                arrives_at=arrives,
+                settled_at=None,
+            )
+            note = (
+                f"Withdrawn {debit:.6g} {asset} from {from_venue} "
+                f"(fee {fee:.6g}). {amount:.6g} arrives on {to_venue} in "
+                f"~{delay_s / 60:.0f} min — in transit until then."
+            )
+        else:
+            dest = bal.get((to_venue, asset), 0.0) + amount
+            await self.db.set_balance(to_venue, asset, dest)
+            record = await self.db.insert_transfer(
+                asset=asset,
+                from_venue=from_venue,
+                to_venue=to_venue,
+                amount=debit,
+                delayed=False,
+                fee_amount=fee,
+                net_amount=amount,
+                status="settled",
+                arrives_at=now.isoformat(),
+                settled_at=now.isoformat(),
+            )
+            note = (
+                f"Instant paper transfer (test/debug): credited {amount:.6g} {asset} "
+                f"on {to_venue}; fee {fee:.6g} burned."
+            )
+
         return {
             "transfer": record,
             "portfolio": await self.portfolio(),
-            "note": (
-                "Transfer applied instantly in paper mode. "
-                "delayed=true is a flag only — real withdrawals are out of scope for v1."
-                if delayed
-                else "Transfer applied instantly in paper mode."
-            ),
+            "note": note,
         }
