@@ -8,7 +8,7 @@ import { TradingViewChart } from './components/TradingViewChart'
 import { useOpportunities } from './hooks/useOpportunities'
 
 export default function App() {
-  const { prices, scanCount, connected, lastUpdateAt, feedModes, autoPaper, autoFillSeq } =
+  const { prices, scanCount, scansLastMinute, connected, autoPaper, autoFillSeq } =
     useOpportunities()
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null)
   const [historyKey, setHistoryKey] = useState(0)
@@ -37,8 +37,7 @@ export default function App() {
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
       <Header
         connected={connected}
-        scanCount={scanCount}
-        lastUpdateAt={lastUpdateAt}
+        scansLastMinute={scansLastMinute}
         autoPaper={autoPaper}
       />
 
@@ -49,18 +48,9 @@ export default function App() {
           onChange={refreshPaper}
           refreshKey={historyKey + autoFillSeq}
         />
-        <PricesAndHistory
-          prices={prices}
-          refreshKey={historyKey}
-          lastUpdateAt={lastUpdateAt}
-          feedModes={feedModes}
-        />
+        <PricesAndHistory prices={prices} refreshKey={historyKey} />
         <SettingsPanel onSaved={refreshPaper} />
       </main>
-
-      <footer className="mt-10 border-t border-[var(--border)] pt-4 text-xs text-[var(--muted)]">
-        v1 · auto paper on edges · live trading deferred
-      </footer>
     </div>
   )
 }

@@ -23,7 +23,7 @@ from app.engine.triangular import triangular_symbols
 from app.feeds.poller import PriceFeed, TickStore
 from app.paper.auto import AutoPaperTrader
 from app.paper.broker import PaperBroker, PaperBrokerError
-from app.paper.equity import backfill_equity_from_trades, mark_equity_usdt
+from app.paper.equity import backfill_equity_from_trades, mark_equity_by_venue, mark_equity_usdt
 from app.paper.rebalance import AutoRebalancer
 
 logging.basicConfig(level=logging.INFO)
@@ -149,7 +149,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     async def snapshot_equity(ticks: list, note: str | None = None) -> dict[str, Any] | None:
-        from app.paper.equity import mid_prices_usdt
+        from app.paper.equity import mark_equity_by_venue, mid_prices_usdt
 
         px = mid_prices_usdt(ticks)
         if not all(k in px for k in ("BTC", "ETH", "SOL")):
@@ -157,11 +157,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         portfolio = await broker.portfolio()
         by_venue = portfolio.get("by_venue", {})
         equity, cash = mark_equity_usdt(by_venue, ticks)
+        by_eq = mark_equity_by_venue(by_venue, ticks)
         return await db.record_equity(
             equity_usdt=equity,
             realized_pnl_usdt=float(portfolio.get("realized_pnl_usdt") or 0),
             usdt_total=cash,
             note=note,
+            by_venue=by_eq,
         )
 
     async def maybe_backfill_equity(ticks: list) -> None:
@@ -421,19 +423,39 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/paper/equity")
     async def paper_equity(limit: int = 400, hours: float | None = None) -> dict[str, Any]:
+        from datetime import timedelta
+
+        from app.models import utcnow
+
         rows = await db.list_equity(
             limit=min(max(limit, 10), 2000),
             hours=hours if hours and hours > 0 else None,
         )
         ticks = await store.snapshot()
         portfolio = await broker.portfolio()
-        equity, cash = mark_equity_usdt(portfolio.get("by_venue", {}), ticks)
+        by_venue = portfolio.get("by_venue", {})
+        equity, cash = mark_equity_usdt(by_venue, ticks)
+        current_by = mark_equity_by_venue(by_venue, ticks)
+        cutoff = (utcnow() - timedelta(hours=24)).isoformat()
+        past_by = await db.equity_by_venue_at_or_before(cutoff)
+        venues: dict[str, dict[str, Any]] = {}
+        for venue, eq in current_by.items():
+            daily_pct: float | None = None
+            if past_by is not None and venue in past_by:
+                base = float(past_by[venue])
+                if base > 1e-9:
+                    daily_pct = ((eq - base) / base) * 100.0
+            venues[venue] = {
+                "equity_usdt": eq,
+                "daily_pct": daily_pct,
+            }
         return {
             "current": {
                 "equity_usdt": equity,
                 "usdt_total": cash,
                 "realized_pnl_usdt": float(portfolio.get("realized_pnl_usdt") or 0),
             },
+            "venues": venues,
             "history": rows,
             "hours": hours,
             "auto_rebalance": rebalancer.status(),

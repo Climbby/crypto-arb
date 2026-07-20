@@ -32,18 +32,31 @@ def mark_equity_usdt(
 
     Coins are marked at mid of */USDT books. Unknown assets are ignored.
     """
-    px = mid_prices_usdt(ticks)
-    equity = 0.0
+    by = mark_equity_by_venue(by_venue, ticks)
+    equity = sum(by.values())
     cash = 0.0
     for assets in by_venue.values():
+        cash += float(assets.get("USDT") or 0)
+    return equity, cash
+
+
+def mark_equity_by_venue(
+    by_venue: dict[str, dict[str, float]],
+    ticks: list[Tick],
+) -> dict[str, float]:
+    """Return marked equity USDT per venue."""
+    px = mid_prices_usdt(ticks)
+    out: dict[str, float] = {}
+    for venue, assets in by_venue.items():
+        total = 0.0
         for asset, amount in assets.items():
             amt = float(amount)
             if asset == "USDT":
-                equity += amt
-                cash += amt
+                total += amt
             elif asset in px:
-                equity += amt * px[asset]
-    return equity, cash
+                total += amt * px[asset]
+        out[venue] = total
+    return out
 
 
 async def backfill_equity_from_trades(
@@ -75,6 +88,7 @@ async def backfill_equity_from_trades(
         return 0
 
     equity_now, cash_now = mark_equity_usdt(by_venue, ticks)
+    by_eq = mark_equity_by_venue(by_venue, ticks)
     mtm_baseline = equity_now - float(realized_pnl_usdt)
     cash_baseline = cash_now - float(realized_pnl_usdt)
 
@@ -115,6 +129,7 @@ async def backfill_equity_from_trades(
         usdt_total=cash_baseline,
         note="backfill:start",
         recorded_at=start_iso,
+        by_venue=by_eq,
     )
 
     cum = 0.0
@@ -130,6 +145,7 @@ async def backfill_equity_from_trades(
             usdt_total=cash_baseline + cum,
             note="backfill:trade",
             recorded_at=ts,
+            by_venue=by_eq,
         )
         written += 1
 

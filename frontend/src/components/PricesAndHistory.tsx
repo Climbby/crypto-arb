@@ -5,8 +5,6 @@ import { HoverLineChart, type ChartDatum } from './HoverLineChart'
 type Props = {
   prices: Tick[]
   refreshKey: number
-  lastUpdateAt: number | null
-  feedModes?: Record<string, string>
 }
 
 const MAJORS = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT'] as const
@@ -18,22 +16,42 @@ function formatPrice(symbol: string, value: number): string {
   return value.toFixed(2)
 }
 
-export function PricesAndHistory({ prices, refreshKey, lastUpdateAt, feedModes }: Props) {
+type TopEdgeRow = {
+  symbol: string
+  buy_exchange: string
+  sell_exchange: string
+  net_edge_pct: number
+  recorded_at: string
+  count: number
+}
+
+function groupTopEdges(
+  top: { symbol: string; buy_exchange: string; sell_exchange: string; net_edge_pct: number; recorded_at: string }[],
+): TopEdgeRow[] {
+  const map = new Map<string, TopEdgeRow>()
+  for (const h of top) {
+    const key = `${h.symbol}|${h.buy_exchange}|${h.sell_exchange}`
+    const existing = map.get(key)
+    if (!existing) {
+      map.set(key, { ...h, count: 1 })
+      continue
+    }
+    existing.count += 1
+    if (h.net_edge_pct > existing.net_edge_pct) {
+      existing.net_edge_pct = h.net_edge_pct
+      existing.recorded_at = h.recorded_at
+    }
+  }
+  return [...map.values()].sort((a, b) => b.net_edge_pct - a.net_edge_pct)
+}
+
+export function PricesAndHistory({ prices, refreshKey }: Props) {
   const [stats, setStats] = useState<Stats | null>(null)
-  const [now, setNow] = useState(Date.now())
   const [hours, setHours] = useState(24)
 
   useEffect(() => {
     void api.getStats(hours).then(setStats).catch(() => setStats(null))
   }, [refreshKey, hours])
-
-  useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), 1000)
-    return () => window.clearInterval(id)
-  }, [])
-
-  const ageSec =
-    lastUpdateAt == null ? null : Math.max(0, Math.floor((now - lastUpdateAt) / 1000))
 
   const historyChartData: ChartDatum[] = useMemo(() => {
     const buckets = stats?.buckets ?? []
@@ -50,6 +68,8 @@ export function PricesAndHistory({ prices, refreshKey, lastUpdateAt, feedModes }
     })
   }, [stats])
 
+  const topGrouped = useMemo(() => groupTopEdges(stats?.top ?? []), [stats])
+
   const bySymbol = useMemo(() => {
     const map: Record<string, Tick[]> = {}
     for (const p of prices) {
@@ -65,29 +85,7 @@ export function PricesAndHistory({ prices, refreshKey, lastUpdateAt, feedModes }
   return (
     <section className="grid gap-4 lg:grid-cols-2">
       <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-panel)]/80 p-4">
-        <div className="flex flex-wrap items-baseline justify-between gap-3">
-          <div>
-            <h2 className="m-0 text-lg font-medium">Live prices</h2>
-            <p className="m-0 mt-1 text-xs text-[var(--muted)]">
-              Compare venues per pair · best bid (sell) and best ask (buy) highlighted
-            </p>
-          </div>
-          <p className="m-0 text-xs text-[var(--muted)]">
-            {ageSec == null
-              ? 'waiting…'
-              : ageSec === 0
-                ? 'updated just now'
-                : `updated ${ageSec}s ago`}
-            {feedModes && Object.keys(feedModes).length > 0 && (
-              <span className="ml-2">
-                ·{' '}
-                {Object.entries(feedModes)
-                  .map(([k, v]) => `${k}:${v}`)
-                  .join(' ')}
-              </span>
-            )}
-          </p>
-        </div>
+        <h2 className="m-0 text-lg font-medium">Live prices</h2>
 
         <div className="mt-4 space-y-4">
           {MAJORS.every((s) => !(bySymbol[s]?.length)) ? (
@@ -163,13 +161,19 @@ export function PricesAndHistory({ prices, refreshKey, lastUpdateAt, feedModes }
       </div>
 
       <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-panel)]/80 p-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h2 className="m-0 text-lg font-medium">Edge activity</h2>
-            <p className="m-0 mt-1 text-xs text-[var(--muted)]">
-              How often theoretical edges appeared (not trades). Your fills are in Paper portfolio.
-            </p>
-          </div>
+        <div>
+          <h2 className="m-0 text-lg font-medium">Edge activity</h2>
+          <p className="m-0 mt-1 text-xs text-[var(--muted)]">
+            How often theoretical edges appeared (not trades).
+          </p>
+        </div>
+
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+          <p className="m-0 text-xs text-[var(--muted)]">
+            {stats
+              ? `${stats.count} detections · avg ${stats.avg_net_edge_pct.toFixed(3)}% · max ${stats.max_net_edge_pct.toFixed(3)}%`
+              : 'Loading…'}
+          </p>
           <select
             value={hours}
             onChange={(e) => setHours(Number(e.target.value))}
@@ -180,13 +184,6 @@ export function PricesAndHistory({ prices, refreshKey, lastUpdateAt, feedModes }
             <option value={168}>7d</option>
           </select>
         </div>
-
-        {stats && (
-          <p className="mt-2 text-xs text-[var(--muted)]">
-            {stats.count} detections · avg {stats.avg_net_edge_pct.toFixed(3)}% · max{' '}
-            {stats.max_net_edge_pct.toFixed(3)}%
-          </p>
-        )}
 
         {historyChartData.length > 0 ? (
           <HoverLineChart
@@ -202,8 +199,8 @@ export function PricesAndHistory({ prices, refreshKey, lastUpdateAt, feedModes }
         <h3 className="m-0 mt-4 mb-2 text-sm font-medium text-[var(--muted)]">
           Top edges this window
         </h3>
-        <div className="max-h-48 overflow-auto text-sm">
-          {(stats?.top.length ?? 0) === 0 ? (
+        <div className="max-h-[min(28rem,50vh)] overflow-auto text-sm">
+          {topGrouped.length === 0 ? (
             <p className="text-[var(--muted)]">No top edges yet for this range.</p>
           ) : (
             <table className="w-full min-w-[420px] border-collapse">
@@ -215,9 +212,9 @@ export function PricesAndHistory({ prices, refreshKey, lastUpdateAt, feedModes }
                 </tr>
               </thead>
               <tbody>
-                {stats!.top.map((h, i) => (
+                {topGrouped.map((h) => (
                   <tr
-                    key={`${h.symbol}-${h.buy_exchange}-${h.sell_exchange}-${h.recorded_at}-${i}`}
+                    key={`${h.symbol}-${h.buy_exchange}-${h.sell_exchange}`}
                     className="border-t border-[var(--border)]/50"
                   >
                     <td className="py-1.5 text-[var(--muted)]">
@@ -225,6 +222,7 @@ export function PricesAndHistory({ prices, refreshKey, lastUpdateAt, feedModes }
                     </td>
                     <td className="py-1.5">
                       {h.symbol} · {h.buy_exchange}→{h.sell_exchange}
+                      {h.count > 1 ? ` (x${h.count})` : ''}
                     </td>
                     <td className="py-1.5 text-[var(--accent)]">{h.net_edge_pct.toFixed(3)}</td>
                   </tr>

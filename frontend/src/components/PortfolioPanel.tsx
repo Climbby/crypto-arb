@@ -16,61 +16,42 @@ const EQUITY_RANGES: { label: string; hours: number | null }[] = [
   { label: 'All', hours: null },
 ]
 
-export function PortfolioPanel({ portfolio, onChange, refreshKey = 0 }: Props) {
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
+type ChartTab = 'equity' | 'pnl'
+
+type VenueEquity = {
+  equity_usdt: number
+  daily_pct: number | null
+}
+
+const TRADE_LOG_LIMIT = 40
+const TRANSFER_LOG_LIMIT = 20
+
+export function PortfolioPanel({ portfolio, onChange: _onChange, refreshKey = 0 }: Props) {
   const [equityNow, setEquityNow] = useState<number | null>(null)
+  const [pnlNow, setPnlNow] = useState<number | null>(null)
   const [equityHist, setEquityHist] = useState<EquityPoint[]>([])
-  const [rebalanceNote, setRebalanceNote] = useState<string | null>(null)
+  const [venues, setVenues] = useState<Record<string, VenueEquity>>({})
   const [hours, setHours] = useState<number | null>(null)
+  const [chartTab, setChartTab] = useState<ChartTab>('equity')
 
   useEffect(() => {
     void api
       .getEquity(2000, hours)
       .then((r) => {
         setEquityNow(r.current.equity_usdt)
+        setPnlNow(r.current.realized_pnl_usdt)
         setEquityHist(r.history)
-        const last = r.auto_rebalance?.last_result
-        if (last?.ok && last.from_venue && last.to_venue) {
-          setRebalanceNote(
-            `Last auto transfer: ${Number(last.amount).toFixed(4)} ${last.asset} ${last.from_venue}→${last.to_venue}`,
-          )
-        } else if (last?.reason) {
-          setRebalanceNote(last.reason)
-        } else if (r.auto_rebalance?.enabled) {
-          setRebalanceNote('Auto-rebalance ON — moves USDT/coins when a venue is short for an edge')
-        } else {
-          setRebalanceNote(null)
-        }
+        setVenues(r.venues ?? {})
       })
       .catch(() => {
         /* ignore */
       })
   }, [refreshKey, hours, portfolio?.realized_pnl_usdt, portfolio?.trades.length])
 
-  const chartMeta = useMemo(() => {
-    if (equityHist.length < 2) return null
-    const vals = equityHist.map((p) => p.equity_usdt)
-    return {
-      min: Math.min(...vals),
-      max: Math.max(...vals),
-      start: vals[0],
-      end: vals[vals.length - 1],
-    }
-  }, [equityHist])
-
-  const equityData: ChartDatum[] = useMemo(() => {
-    const shortTime = (iso: string) => {
+  const shortTime = useMemo(() => {
+    return (iso: string) => {
       const d = new Date(iso)
-      if (hours == null || hours >= 168) {
-        return d.toLocaleString(undefined, {
-          month: 'short',
-          day: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit',
-        })
-      }
-      if (hours >= 24) {
+      if (hours == null || hours >= 24) {
         return d.toLocaleString(undefined, {
           month: 'short',
           day: 'numeric',
@@ -80,67 +61,78 @@ export function PortfolioPanel({ portfolio, onChange, refreshKey = 0 }: Props) {
       }
       return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
     }
+  }, [hours])
+
+  const chartData: ChartDatum[] = useMemo(() => {
+    const key = chartTab === 'equity' ? 'equity_usdt' : 'realized_pnl_usdt'
     return equityHist.map((p) => ({
-      y: p.equity_usdt,
+      y: p[key],
       axisLabel: shortTime(p.recorded_at),
       label: `${new Date(p.recorded_at).toLocaleString()}${p.note ? ` · ${p.note}` : ''}`,
-      valueLabel: p.equity_usdt.toFixed(2),
+      valueLabel: p[key].toFixed(2),
     }))
-  }, [equityHist, hours])
+  }, [equityHist, chartTab, shortTime])
 
-  async function reset() {
-    setBusy(true)
-    setError(null)
-    try {
-      await api.resetPaper()
-      onChange()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setBusy(false)
-    }
-  }
+  const liveCurrent =
+    chartTab === 'equity'
+      ? (equityNow ?? (chartData.length ? chartData[chartData.length - 1].y : null))
+      : (pnlNow ?? portfolio?.realized_pnl_usdt ?? (chartData.length ? chartData[chartData.length - 1].y : null))
 
-  const equityDelta = chartMeta == null ? null : chartMeta.end - chartMeta.start
-  const rangeLabel =
-    hours == null ? 'all time' : hours === 168 ? 'last 7d' : `last ${hours}h`
+  const formatMoney = (v: number) =>
+    v.toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })
+
+  const trades = (portfolio?.trades ?? []).slice(0, TRADE_LOG_LIMIT)
+  const transfers = (portfolio?.transfers ?? []).slice(0, TRANSFER_LOG_LIMIT)
 
   return (
     <section className="rounded-lg border border-[var(--border)] bg-[var(--bg-panel)]/80 p-4">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="m-0 text-lg font-medium">Paper portfolio</h2>
-          <p className="m-0 mt-1 text-xs text-[var(--muted)]">
-            Marked equity:{' '}
-            <span className="text-[var(--accent)]">
-              {(equityNow ?? 0).toFixed(2)} USDT
-            </span>
-            {' · '}
-            Realized PnL:{' '}
-            <span className="text-[var(--accent)]">
-              {(portfolio?.realized_pnl_usdt ?? 0).toFixed(4)} USDT
-            </span>
-          </p>
-        </div>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => void reset()}
-          className="rounded border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--muted)] hover:text-[var(--text)]"
-        >
-          Reset
-        </button>
-      </div>
-
-      {error && (
-        <p className="mb-3 rounded border border-[var(--danger)]/40 bg-[var(--danger)]/10 px-3 py-2 text-sm text-[var(--danger)]">
-          {error}
+      <div className="mb-3">
+        <h2 className="m-0 text-lg font-medium">Paper portfolio</h2>
+        <p className="m-0 mt-1 text-xs text-[var(--muted)]">
+          Marked equity:{' '}
+          <span className="text-[var(--accent)]">
+            {(equityNow ?? 0).toFixed(2)} USDT
+          </span>
+          {' · '}
+          Realized PnL:{' '}
+          <span className="text-[var(--accent)]">
+            {(portfolio?.realized_pnl_usdt ?? pnlNow ?? 0).toFixed(4)} USDT
+          </span>
         </p>
-      )}
+      </div>
 
       <div className="mb-4 rounded border border-[var(--border)]/80 bg-[var(--bg)]/40 p-3">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <h3 className="m-0 text-sm font-medium">Equity over time</h3>
+          <div
+            className="inline-flex rounded border border-[var(--border)] p-0.5"
+            role="tablist"
+            aria-label="Chart series"
+          >
+            {(
+              [
+                { id: 'equity', label: 'Equity' },
+                { id: 'pnl', label: 'PnL' },
+              ] as const
+            ).map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={chartTab === tab.id}
+                onClick={() => setChartTab(tab.id)}
+                className={`rounded px-2.5 py-1 text-xs font-medium ${
+                  chartTab === tab.id
+                    ? 'bg-[var(--accent)] text-[#062016]'
+                    : 'text-[var(--muted)] hover:text-[var(--text)]'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
           <div className="flex flex-wrap gap-1">
             {EQUITY_RANGES.map((r) => (
               <button
@@ -158,59 +150,72 @@ export function PortfolioPanel({ portfolio, onChange, refreshKey = 0 }: Props) {
             ))}
           </div>
         </div>
-        <p className="m-0 mb-2 text-xs text-[var(--muted)]">
-          Showing {rangeLabel} · {equityHist.length} point
-          {equityHist.length === 1 ? '' : 's'}
-          {chartMeta
-            ? ` · ${chartMeta.min.toFixed(0)} → ${chartMeta.max.toFixed(0)} · Δ ${equityDelta! >= 0 ? '+' : ''}${equityDelta!.toFixed(2)}`
-            : ''}
-        </p>
-        {equityData.length >= 2 ? (
+        {chartData.length >= 2 ? (
           <HoverLineChart
-            data={equityData}
+            data={chartData}
             height={180}
-            ariaLabel="Paper equity over time"
+            ariaLabel={
+              chartTab === 'equity' ? 'Paper equity over time' : 'Realized PnL over time'
+            }
             className="rounded border border-[var(--border)]/40 bg-[var(--bg)]/30"
             showLevels
-            formatLevel={(v) =>
-              v.toLocaleString(undefined, {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })
-            }
+            currentValue={liveCurrent}
+            formatLevel={formatMoney}
           />
         ) : (
           <p className="m-0 text-sm text-[var(--muted)]">
-            Not enough equity snapshots in this window yet — try a wider range or wait for the next
-            fill / heartbeat.
+            Not enough snapshots in this window yet — try a wider range or wait for the next fill
+            / heartbeat.
           </p>
-        )}
-        {rebalanceNote && (
-          <p className="mt-2 m-0 text-xs text-[var(--muted)]">{rebalanceNote}</p>
         )}
       </div>
 
       <div className="mb-4 grid gap-3 sm:grid-cols-3">
-        {Object.entries(portfolio?.by_venue ?? {}).map(([venue, assets]) => (
-          <div key={venue} className="rounded border border-[var(--border)] bg-[var(--bg)]/60 p-3">
-            <p className="m-0 text-xs uppercase tracking-wider text-[var(--muted)]">{venue}</p>
-            <ul className="mt-2 space-y-1 text-sm">
-              {Object.entries(assets).map(([a, amt]) => (
-                <li key={a} className="flex justify-between gap-2">
-                  <span className="text-[var(--muted)]">{a}</span>
-                  <span>{amt < 1 ? amt.toFixed(6) : amt.toFixed(2)}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
+        {Object.entries(portfolio?.by_venue ?? {}).map(([venue, assets]) => {
+          const v = venues[venue]
+          const daily = v?.daily_pct
+          return (
+            <div key={venue} className="rounded border border-[var(--border)] bg-[var(--bg)]/60 p-3">
+              <p className="m-0 text-xs uppercase tracking-wider text-[var(--muted)]">{venue}</p>
+              <p className="m-0 mt-1 text-sm">
+                Equity{' '}
+                <span className="font-medium text-[var(--accent)] tabular-nums">
+                  {v ? formatMoney(v.equity_usdt) : '—'} USDT
+                </span>
+              </p>
+              <p className="m-0 mt-0.5 text-xs text-[var(--muted)]">
+                24h{' '}
+                {daily == null ? (
+                  <span>—</span>
+                ) : (
+                  <span
+                    className={`tabular-nums ${
+                      daily >= 0 ? 'text-[var(--accent)]' : 'text-[var(--danger)]'
+                    }`}
+                  >
+                    {daily >= 0 ? '+' : ''}
+                    {daily.toFixed(2)}%
+                  </span>
+                )}
+              </p>
+              <ul className="mt-2 space-y-1 text-sm">
+                {Object.entries(assets).map(([a, amt]) => (
+                  <li key={a} className="flex justify-between gap-2">
+                    <span className="text-[var(--muted)]">{a}</span>
+                    <span>{amt < 1 ? amt.toFixed(6) : amt.toFixed(2)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )
+        })}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <div>
           <h3 className="m-0 mb-2 text-sm font-medium text-[var(--muted)]">Trade log</h3>
           <div className="max-h-48 overflow-auto text-sm">
-            {(portfolio?.trades.length ?? 0) === 0 ? (
+            {trades.length === 0 ? (
               <p className="text-[var(--muted)]">No paper trades yet.</p>
             ) : (
               <table className="w-full min-w-[420px] border-collapse">
@@ -222,7 +227,7 @@ export function PortfolioPanel({ portfolio, onChange, refreshKey = 0 }: Props) {
                   </tr>
                 </thead>
                 <tbody>
-                  {portfolio!.trades.map((t) => (
+                  {trades.map((t) => (
                     <tr key={t.id} className="border-t border-[var(--border)]/50">
                       <td className="py-1.5 text-[var(--muted)]">
                         {new Date(t.executed_at).toLocaleTimeString()}
@@ -240,11 +245,8 @@ export function PortfolioPanel({ portfolio, onChange, refreshKey = 0 }: Props) {
         </div>
         <div>
           <h3 className="m-0 mb-2 text-sm font-medium text-[var(--muted)]">Transfer log</h3>
-          <p className="m-0 mb-2 text-xs text-[var(--muted)]">
-            Auto-rebalance moves when a venue is short for an edge.
-          </p>
           <div className="max-h-48 overflow-auto text-sm">
-            {(portfolio?.transfers.length ?? 0) === 0 ? (
+            {transfers.length === 0 ? (
               <p className="text-[var(--muted)]">No transfers yet.</p>
             ) : (
               <table className="w-full min-w-[420px] border-collapse">
@@ -256,7 +258,7 @@ export function PortfolioPanel({ portfolio, onChange, refreshKey = 0 }: Props) {
                   </tr>
                 </thead>
                 <tbody>
-                  {portfolio!.transfers.map((t) => (
+                  {transfers.map((t) => (
                     <tr key={t.id} className="border-t border-[var(--border)]/50">
                       <td className="py-1.5 text-[var(--muted)]">
                         {new Date(t.transferred_at).toLocaleTimeString()}

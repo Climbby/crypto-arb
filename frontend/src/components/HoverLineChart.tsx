@@ -9,6 +9,8 @@ export type ChartDatum = {
   valueLabel: string
 }
 
+type LevelKind = 'high' | 'low' | 'start' | 'current'
+
 type Props = {
   data: ChartDatum[]
   height?: number
@@ -17,6 +19,8 @@ type Props = {
   /** TradingView-style: side prices + level lines, time axis, price-only hover */
   showLevels?: boolean
   formatLevel?: (value: number) => string
+  /** Optional live current (overrides last point for the Current tag) */
+  currentValue?: number | null
 }
 
 function niceTicks(min: number, max: number, count: number): number[] {
@@ -32,6 +36,16 @@ function niceTicks(min: number, max: number, count: number): number[] {
   return ticks
 }
 
+const LEVEL_META: Record<
+  LevelKind,
+  { title: string; line: 'solid' | 'dash'; emphasis: boolean }
+> = {
+  high: { title: 'High', line: 'solid', emphasis: false },
+  low: { title: 'Low', line: 'solid', emphasis: false },
+  start: { title: 'Start', line: 'dash', emphasis: false },
+  current: { title: 'Current', line: 'dash', emphasis: true },
+}
+
 /**
  * SVG line chart with nearest-point hover.
  * ViewBox width tracks the container so hover X matches the drawn line.
@@ -43,6 +57,7 @@ export function HoverLineChart({
   ariaLabel = 'Chart',
   showLevels = false,
   formatLevel = (v) => v.toFixed(2),
+  currentValue = null,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
@@ -62,7 +77,7 @@ export function HoverLineChart({
     if (data.length === 0 || width <= 0) return null
 
     const padL = 8
-    const padR = showLevels ? 78 : 10
+    const padR = showLevels ? 118 : 10
     const padT = 10
     const padB = showLevels ? 24 : 10
     const plotW = Math.max(1, width - padL - padR)
@@ -72,10 +87,15 @@ export function HoverLineChart({
     const min = Math.min(...ys)
     const max = Math.max(...ys)
     const start = ys[0]
-    const span = Math.max(max - min, 1e-9)
+    const end = ys[ys.length - 1]
+    const current = currentValue != null && Number.isFinite(currentValue) ? currentValue : end
+    // Expand scale so Current stays on-plot when live value is outside history
+    const plotMin = Math.min(min, current)
+    const plotMax = Math.max(max, current)
+    const span = Math.max(plotMax - plotMin, 1e-9)
     const step = plotW / Math.max(data.length - 1, 1)
 
-    const yAt = (v: number) => padT + plotH - ((v - min) / span) * plotH
+    const yAt = (v: number) => padT + plotH - ((v - plotMin) / span) * plotH
     const points = data.map((d, i) => ({
       x: padL + i * step,
       y: yAt(d.y),
@@ -85,17 +105,26 @@ export function HoverLineChart({
       valueLabel: d.valueLabel,
     }))
 
-    // Side levels: high, start, low (TradingView-style tags)
-    const levels = [
-      { key: 'max', value: max, kind: 'bound' as const },
-      { key: 'start', value: start, kind: 'start' as const },
-      { key: 'min', value: min, kind: 'bound' as const },
+    const levels: { key: LevelKind; value: number }[] = [
+      { key: 'high', value: max },
+      { key: 'current', value: current },
+      { key: 'start', value: start },
+      { key: 'low', value: min },
     ]
 
-    // Extra grid ticks between bounds when there's room
+    // Always keep High / Low / Current. Drop Start only if it collides with those.
+    const kept: typeof levels = levels.filter((lv) => {
+      if (lv.key !== 'start') return true
+      return !['high', 'low', 'current'].some(
+        (k) =>
+          Math.abs(levels.find((l) => l.key === k)!.value - lv.value) / span < 0.012,
+      )
+    })
+
     const grid = showLevels
-      ? niceTicks(min, max, 5).filter(
-          (t) => Math.abs(t - min) / span > 0.04 && Math.abs(t - max) / span > 0.04,
+      ? niceTicks(plotMin, plotMax, 5).filter(
+          (t) =>
+            Math.abs(t - plotMin) / span > 0.04 && Math.abs(t - plotMax) / span > 0.04,
         )
       : []
 
@@ -119,20 +148,17 @@ export function HoverLineChart({
       padR,
       padT,
       padB,
-      plotW,
-      plotH,
-      min,
-      max,
-      start,
+      plotMin,
+      plotMax,
       span,
       yAt,
-      levels,
+      levels: kept,
       grid,
       xTicks,
       points,
       polyline: points.map((p) => `${p.x},${p.y}`).join(' '),
     }
-  }, [data, width, height, showLevels])
+  }, [data, width, height, showLevels, currentValue])
 
   const onMove = useCallback(
     (ev: React.MouseEvent<HTMLDivElement>) => {
@@ -155,6 +181,25 @@ export function HoverLineChart({
 
   const active = hoverIndex != null && layout ? layout.points[hoverIndex] : null
 
+  // Stable vertical slots so overlapping tags don't stack on the same pixel
+  const levelTops = useMemo(() => {
+    if (!layout) return {} as Record<string, number>
+    const ordered = [...layout.levels].sort(
+      (a, b) => layout.yAt(a.value) - layout.yAt(b.value),
+    )
+    const tops: Record<string, number> = {}
+    let lastBottom = -Infinity
+    const tagH = 16
+    for (const lv of ordered) {
+      let top = layout.yAt(lv.value) - tagH / 2
+      if (top < lastBottom + 2) top = lastBottom + 2
+      top = Math.max(2, Math.min(height - tagH - 2, top))
+      tops[lv.key] = top
+      lastBottom = top + tagH
+    }
+    return tops
+  }, [layout, height])
+
   return (
     <div
       ref={wrapRef}
@@ -172,7 +217,6 @@ export function HoverLineChart({
           role="img"
           aria-label={ariaLabel}
         >
-          {/* Grid / level lines */}
           {showLevels &&
             layout.grid.map((v) => (
               <line
@@ -188,20 +232,23 @@ export function HoverLineChart({
               />
             ))}
           {showLevels &&
-            layout.levels.map((lv) => (
-              <line
-                key={lv.key}
-                x1={layout.padL}
-                x2={width - layout.padR}
-                y1={layout.yAt(lv.value)}
-                y2={layout.yAt(lv.value)}
-                stroke={lv.kind === 'start' ? 'var(--accent)' : 'var(--border)'}
-                strokeWidth={lv.kind === 'start' ? 1.25 : 1}
-                strokeDasharray={lv.kind === 'start' ? '5 4' : undefined}
-                opacity={lv.kind === 'start' ? 0.85 : 0.75}
-                vectorEffect="non-scaling-stroke"
-              />
-            ))}
+            layout.levels.map((lv) => {
+              const meta = LEVEL_META[lv.key]
+              return (
+                <line
+                  key={lv.key}
+                  x1={layout.padL}
+                  x2={width - layout.padR}
+                  y1={layout.yAt(lv.value)}
+                  y2={layout.yAt(lv.value)}
+                  stroke={meta.emphasis ? 'var(--accent)' : 'var(--border)'}
+                  strokeWidth={meta.emphasis ? 1.25 : 1}
+                  strokeDasharray={meta.line === 'dash' ? '5 4' : undefined}
+                  opacity={meta.emphasis ? 0.9 : 0.7}
+                  vectorEffect="non-scaling-stroke"
+                />
+              )
+            })}
 
           <polyline
             fill="none"
@@ -253,48 +300,33 @@ export function HoverLineChart({
         <div style={{ height }} className="w-full" />
       )}
 
-      {/* Right-side price tags (HTML so text doesn't distort) */}
       {showLevels && layout && width > 0 && (
         <>
           {layout.levels.map((lv) => {
-            const topPx = layout.yAt(lv.value)
-            // Nudge labels apart if start sits on min/max
-            let nudge = 0
-            if (lv.key === 'start') {
-              const maxY = layout.yAt(layout.max)
-              const minY = layout.yAt(layout.min)
-              if (Math.abs(topPx - maxY) < 12) nudge = 12
-              else if (Math.abs(topPx - minY) < 12) nudge = -12
-            }
+            const meta = LEVEL_META[lv.key]
             const isHoverNear =
               active != null && Math.abs(active.value - lv.value) / layout.span < 0.002
             return (
               <div
                 key={lv.key}
-                className={`pointer-events-none absolute z-[1] rounded px-1 py-0.5 text-[10px] tabular-nums leading-none ${
-                  lv.kind === 'start'
-                    ? 'bg-[var(--accent)] text-[#062016]'
+                className={`pointer-events-none absolute z-[1] max-w-[112px] truncate rounded px-1 py-0.5 text-[10px] tabular-nums leading-none ${
+                  meta.emphasis
+                    ? 'bg-[var(--accent)] font-medium text-[#062016]'
                     : 'bg-[var(--bg-panel)] text-[var(--muted)] ring-1 ring-[var(--border)]'
                 }`}
                 style={{
                   right: 4,
-                  top: Math.max(2, Math.min(height - 14, topPx + nudge - 6)),
+                  top: levelTops[lv.key] ?? 2,
                   opacity: isHoverNear && active ? 0.35 : 1,
                 }}
-                title={
-                  lv.key === 'max'
-                    ? 'High'
-                    : lv.key === 'min'
-                      ? 'Low'
-                      : 'Start of timeframe'
-                }
+                title={`${meta.title}: ${formatLevel(lv.value)}`}
               >
+                <span className="opacity-80">{meta.title}</span>{' '}
                 {formatLevel(lv.value)}
               </div>
             )
           })}
 
-          {/* Bottom time axis */}
           {layout.xTicks.map((t) => (
             <div
               key={`${t.x}-${t.label}`}
@@ -311,7 +343,6 @@ export function HoverLineChart({
         </>
       )}
 
-      {/* Hover: price only (TV-style tag on the right) */}
       {active && showLevels && layout && (
         <div
           className="pointer-events-none absolute z-[2] rounded bg-[var(--accent)] px-1.5 py-0.5 text-[10px] font-medium tabular-nums leading-none text-[#062016]"
@@ -324,7 +355,6 @@ export function HoverLineChart({
         </div>
       )}
 
-      {/* Simple tooltip when not in levels mode (edge diary etc.) */}
       {active && !showLevels && (
         <div
           className="pointer-events-none absolute z-10 min-w-[8.5rem] rounded border border-[var(--border)] bg-[var(--bg-panel)] px-2.5 py-1.5 text-xs shadow-md"

@@ -208,6 +208,7 @@ export const api = {
     if (hours != null && hours > 0) params.set('hours', String(hours))
     return request<{
       current: { equity_usdt: number; usdt_total: number; realized_pnl_usdt: number }
+      venues?: Record<string, { equity_usdt: number; daily_pct: number | null }>
       history: EquityPoint[]
       hours?: number | null
       auto_rebalance?: AppSettings['auto_rebalance']

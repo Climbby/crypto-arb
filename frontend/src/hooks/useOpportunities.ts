@@ -27,6 +27,7 @@ type Snapshot = {
   opportunities: Opportunity[]
   prices: Tick[]
   scanCount: number
+  scansLastMinute: number
   connected: boolean
   lastUpdateAt: number | null
   feedModes: Record<string, string>
@@ -34,10 +35,13 @@ type Snapshot = {
   autoFillSeq: number
 }
 
+const SCAN_WINDOW_MS = 60_000
+
 export function useOpportunities(): Snapshot {
   const [opportunities, setOpportunities] = useState<Opportunity[]>([])
   const [prices, setPrices] = useState<Tick[]>([])
   const [scanCount, setScanCount] = useState(0)
+  const [scansLastMinute, setScansLastMinute] = useState(0)
   const [connected, setConnected] = useState(false)
   const [lastUpdateAt, setLastUpdateAt] = useState<number | null>(null)
   const [feedModes, setFeedModes] = useState<Record<string, string>>({})
@@ -47,9 +51,23 @@ export function useOpportunities(): Snapshot {
   const retryTimer = useRef<number | null>(null)
   const intentionalClose = useRef(false)
   const retryCount = useRef(0)
+  const scanTimesRef = useRef<number[]>([])
+  const lastScanCountRef = useRef<number | null>(null)
 
   useEffect(() => {
     intentionalClose.current = false
+
+    const pruneAndCount = (now = Date.now()) => {
+      const cutoff = now - SCAN_WINDOW_MS
+      scanTimesRef.current = scanTimesRef.current.filter((t) => t > cutoff)
+      setScansLastMinute(scanTimesRef.current.length)
+    }
+
+    const noteScan = () => {
+      const now = Date.now()
+      scanTimesRef.current.push(now)
+      pruneAndCount(now)
+    }
 
     const applySnapshot = (data: {
       type?: string
@@ -64,7 +82,16 @@ export function useOpportunities(): Snapshot {
       if (data.type && data.type !== 'opportunities') return
       if (data.opportunities) setOpportunities(data.opportunities)
       if (data.prices) setPrices(data.prices)
-      if (typeof data.scan_count === 'number') setScanCount(data.scan_count)
+      if (typeof data.scan_count === 'number') {
+        const prev = lastScanCountRef.current
+        if (prev == null || data.scan_count > prev) {
+          noteScan()
+        }
+        lastScanCountRef.current = data.scan_count
+        setScanCount(data.scan_count)
+      } else {
+        noteScan()
+      }
       if (data.feed_modes) setFeedModes(data.feed_modes)
       if (data.auto_paper) setAutoPaper(data.auto_paper)
       if (
@@ -124,6 +151,9 @@ export function useOpportunities(): Snapshot {
 
     connect()
 
+    // Keep the last-minute count fresh even if scans pause
+    const pruneTick = window.setInterval(() => pruneAndCount(), 5000)
+
     // REST fallback so the board keeps moving even if WS stalls
     const poll = window.setInterval(() => {
       void Promise.all([
@@ -149,6 +179,7 @@ export function useOpportunities(): Snapshot {
       intentionalClose.current = true
       clearRetry()
       window.clearInterval(poll)
+      window.clearInterval(pruneTick)
       wsRef.current?.close()
       wsRef.current = null
     }
@@ -158,6 +189,7 @@ export function useOpportunities(): Snapshot {
     opportunities,
     prices,
     scanCount,
+    scansLastMinute,
     connected,
     lastUpdateAt,
     feedModes,

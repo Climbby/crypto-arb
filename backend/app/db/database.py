@@ -62,7 +62,8 @@ CREATE TABLE IF NOT EXISTS paper_equity (
     realized_pnl_usdt REAL NOT NULL,
     usdt_total REAL NOT NULL,
     note TEXT,
-    recorded_at TEXT NOT NULL
+    recorded_at TEXT NOT NULL,
+    by_venue_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS app_settings (
@@ -82,7 +83,16 @@ class Database:
         self._conn = await aiosqlite.connect(self.path)
         self._conn.row_factory = aiosqlite.Row
         await self._conn.executescript(SCHEMA)
+        await self._migrate()
         await self._conn.commit()
+
+    async def _migrate(self) -> None:
+        cur = await self.conn.execute("PRAGMA table_info(paper_equity)")
+        cols = {str(r["name"]) for r in await cur.fetchall()}
+        if "by_venue_json" not in cols:
+            await self.conn.execute(
+                "ALTER TABLE paper_equity ADD COLUMN by_venue_json TEXT"
+            )
 
     async def close(self) -> None:
         if self._conn:
@@ -193,7 +203,7 @@ class Database:
             FROM opportunity_snapshots
             WHERE recorded_at >= ?
             ORDER BY net_edge_pct DESC
-            LIMIT 5
+            LIMIT 80
             """,
             (cutoff,),
         )
@@ -368,15 +378,17 @@ class Database:
         usdt_total: float,
         note: str | None = None,
         recorded_at: str | None = None,
+        by_venue: dict[str, float] | None = None,
     ) -> dict[str, Any]:
         now = recorded_at or utcnow().isoformat()
+        by_venue_json = json.dumps(by_venue) if by_venue is not None else None
         cur = await self.conn.execute(
             """
             INSERT INTO paper_equity
-            (equity_usdt, realized_pnl_usdt, usdt_total, note, recorded_at)
-            VALUES (?, ?, ?, ?, ?)
+            (equity_usdt, realized_pnl_usdt, usdt_total, note, recorded_at, by_venue_json)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (equity_usdt, realized_pnl_usdt, usdt_total, note, now),
+            (equity_usdt, realized_pnl_usdt, usdt_total, note, now, by_venue_json),
         )
         await self.conn.commit()
         return {
@@ -386,7 +398,29 @@ class Database:
             "usdt_total": usdt_total,
             "note": note,
             "recorded_at": now,
+            "by_venue": by_venue,
         }
+
+    async def equity_by_venue_at_or_before(self, iso: str) -> dict[str, float] | None:
+        cur = await self.conn.execute(
+            """
+            SELECT by_venue_json FROM paper_equity
+            WHERE by_venue_json IS NOT NULL AND recorded_at <= ?
+            ORDER BY recorded_at DESC, id DESC
+            LIMIT 1
+            """,
+            (iso,),
+        )
+        row = await cur.fetchone()
+        if row is None or not row["by_venue_json"]:
+            return None
+        try:
+            data = json.loads(str(row["by_venue_json"]))
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(data, dict):
+            return None
+        return {str(k): float(v) for k, v in data.items()}
 
     async def list_equity(
         self, limit: int = 500, hours: float | None = None

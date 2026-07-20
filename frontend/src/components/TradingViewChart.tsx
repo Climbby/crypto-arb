@@ -102,12 +102,7 @@ export function TradingViewChart() {
   return (
     <section className="rounded-lg border border-[var(--border)] bg-[var(--bg-panel)]/80 p-4">
       <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h2 className="m-0 text-lg font-medium">TradingView chart</h2>
-          <p className="m-0 mt-1 text-xs text-[var(--muted)]">
-            Embedded market chart · {tvSymbol} · change timeframe in the chart toolbar
-          </p>
-        </div>
+        <h2 className="m-0 text-lg font-medium">TradingView chart</h2>
         <div className="flex flex-wrap gap-2 text-sm">
           <select
             value={pair.label}
