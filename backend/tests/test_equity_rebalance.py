@@ -5,7 +5,11 @@ import pytest
 from app.db.database import Database
 from app.models import Opportunity, Tick, utcnow
 from app.paper.broker import PaperBroker
-from app.paper.equity import backfill_equity_from_trades, mark_equity_usdt
+from app.paper.equity import (
+    backfill_equity_from_trades,
+    mark_equity_usdt,
+    recompute_equity_realized_from_trades,
+)
 
 
 def test_mark_equity_cash_and_coins():
@@ -76,6 +80,55 @@ async def test_backfill_from_trades(broker: PaperBroker):
     # Chart API hides backfill; raw rows must still exist for one-shot reconstruction
     chart = await broker.db.list_equity(limit=50)
     assert all(not str(r.get("note") or "").startswith("backfill") for r in chart)
+
+
+@pytest.mark.asyncio
+async def test_recompute_equity_realized_from_trades(broker: PaperBroker):
+    await broker.db.clear_equity()
+    await broker.db.insert_trade(
+        opp_id="a",
+        symbol="BTC/USDT",
+        buy_exchange="binance",
+        sell_exchange="kraken",
+        quantity=0.01,
+        buy_price=100.0,
+        sell_price=101.0,
+        net_edge_pct=0.5,
+        pnl_usdt=10.0,
+    )
+    # Force wrong executed_at ordering via direct inserts with timestamps
+    await broker.db.conn.execute("DELETE FROM paper_trades")
+    await broker.db.conn.commit()
+    await broker.db.conn.execute(
+        """
+        INSERT INTO paper_trades
+        (opp_id, symbol, buy_exchange, sell_exchange, quantity,
+         buy_price, sell_price, net_edge_pct, pnl_usdt, executed_at)
+        VALUES
+        ('a','BTC/USDT','binance','kraken',0.01,100,101,0.5,10.0,'2026-01-01T00:00:00+00:00'),
+        ('b','BTC/USDT','binance','kraken',0.01,100,101,0.5,5.0,'2026-01-01T01:00:00+00:00')
+        """
+    )
+    await broker.db.conn.commit()
+    await broker.db.record_equity(
+        equity_usdt=10000.0,
+        realized_pnl_usdt=0.0,
+        usdt_total=10000.0,
+        note="heartbeat",
+        recorded_at="2026-01-01T00:30:00+00:00",
+    )
+    await broker.db.record_equity(
+        equity_usdt=10000.0,
+        realized_pnl_usdt=1.0,  # wrong rolling-window value
+        usdt_total=10000.0,
+        note="heartbeat",
+        recorded_at="2026-01-01T02:00:00+00:00",
+    )
+    n = await recompute_equity_realized_from_trades(broker.db)
+    assert n == 2
+    rows = await broker.db.list_equity(limit=10)
+    assert rows[0]["realized_pnl_usdt"] == pytest.approx(10.0)
+    assert rows[1]["realized_pnl_usdt"] == pytest.approx(15.0)
 
 
 @pytest.mark.asyncio

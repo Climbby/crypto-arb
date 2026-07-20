@@ -347,6 +347,35 @@ class Database:
         row = await cur.fetchone()
         return float(row["total"]) if row else 0.0
 
+    async def list_all_trades_asc(self) -> list[dict[str, Any]]:
+        cur = await self.conn.execute(
+            "SELECT id, pnl_usdt, executed_at FROM paper_trades ORDER BY executed_at ASC, id ASC"
+        )
+        rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    async def list_all_equity_ids_asc(self) -> list[dict[str, Any]]:
+        cur = await self.conn.execute(
+            """
+            SELECT id, recorded_at, realized_pnl_usdt FROM paper_equity
+            WHERE COALESCE(note, '') NOT LIKE 'backfill%'
+            ORDER BY recorded_at ASC, id ASC
+            """
+        )
+        rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    async def update_equity_realized_pnl(
+        self, updates: list[tuple[float, int]]
+    ) -> None:
+        if not updates:
+            return
+        await self.conn.executemany(
+            "UPDATE paper_equity SET realized_pnl_usdt = ? WHERE id = ?",
+            updates,
+        )
+        await self.conn.commit()
+
     async def clear_trades(self) -> None:
         await self.conn.execute("DELETE FROM paper_trades")
         await self.conn.commit()

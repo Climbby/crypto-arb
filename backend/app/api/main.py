@@ -28,6 +28,7 @@ from app.paper.equity import (
     mark_equity_by_venue,
     mark_equity_usdt,
     purge_backfill_equity,
+    recompute_equity_realized_from_trades,
 )
 from app.paper.rebalance import AutoRebalancer
 
@@ -267,6 +268,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         purged = await purge_backfill_equity(db)
         if purged:
             logger.info("Purged %s spike-prone backfill equity rows", purged)
+        rewritten = await recompute_equity_realized_from_trades(db)
+        if rewritten:
+            logger.info(
+                "Rewrote realized PnL on %s equity snapshots to lifetime cumulative",
+                rewritten,
+            )
         existing = await db.list_equity(limit=1)
         if not existing:
             await db.record_equity(

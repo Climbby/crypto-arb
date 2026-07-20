@@ -141,6 +141,38 @@ async def backfill_equity_from_trades(
     return written
 
 
+async def recompute_equity_realized_from_trades(db: Database) -> int:
+    """
+    Rewrite paper_equity.realized_pnl_usdt to true cumulative lifetime PnL.
+
+    Older snapshots stored a rolling last-100 sum, which made the PnL chart
+    cliff and then spike when the portfolio switched to lifetime totals.
+    Marked equity_usdt is left unchanged.
+    """
+    trades = await db.list_all_trades_asc()
+    rows = await db.list_all_equity_ids_asc()
+    if not rows:
+        return 0
+
+    cum = 0.0
+    ti = 0
+    updates: list[tuple[float, int]] = []
+    for row in rows:
+        ts = str(row.get("recorded_at") or "")
+        while ti < len(trades):
+            trade_ts = str(trades[ti].get("executed_at") or "")
+            if trade_ts and ts and trade_ts > ts:
+                break
+            cum += float(trades[ti].get("pnl_usdt") or 0.0)
+            ti += 1
+        prev = float(row.get("realized_pnl_usdt") or 0.0)
+        if abs(prev - cum) > 1e-9:
+            updates.append((cum, int(row["id"])))
+
+    await db.update_equity_realized_pnl(updates)
+    return len(updates)
+
+
 async def purge_backfill_equity(db: Database) -> int:
     """Drop reconstructed backfill points once live snapshots exist."""
     cur = await db.conn.execute(
