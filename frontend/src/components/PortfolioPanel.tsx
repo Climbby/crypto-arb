@@ -35,8 +35,10 @@ export function PortfolioPanel({ portfolio, onChange: _onChange, refreshKey = 0 
   const [chartTab, setChartTab] = useState<ChartTab>('equity')
 
   useEffect(() => {
+    const limit =
+      hours == null ? 5000 : hours >= 168 ? 4000 : hours >= 24 ? 3000 : 2000
     void api
-      .getEquity(2000, hours)
+      .getEquity(limit, hours)
       .then((r) => {
         setEquityNow(r.current.equity_usdt)
         setPnlNow(r.current.realized_pnl_usdt)

@@ -93,27 +93,15 @@ async def backfill_equity_from_trades(
     cash_baseline = cash_now - float(realized_pnl_usdt)
 
     if await db.has_backfill_equity():
-        # Replace a bad early backfill (ran before price books were warm)
-        cur = await db.conn.execute(
-            """
-            SELECT equity_usdt FROM paper_equity
-            WHERE note = 'backfill:start'
-            ORDER BY id ASC LIMIT 1
-            """
-        )
-        row = await cur.fetchone()
-        if row is not None:
-            start_eq = float(row["equity_usdt"])
-            if abs(start_eq - mtm_baseline) < 50.0:
-                await _purge_understated_equity(db, mtm_baseline)
-                return 0
-        await db.conn.execute("DELETE FROM paper_equity WHERE note LIKE 'backfill%'")
-        await db.conn.commit()
-    else:
-        earliest = await db.earliest_equity_at()
-        if earliest and earliest <= first_at:
-            await _purge_understated_equity(db, mtm_baseline)
-            return 0
+        # One-shot only: never rewrite backfill (rewrites used flat MTM+PnL and
+        # spiked the live marked-equity chart when interleaved with heartbeats).
+        await _purge_understated_equity(db, mtm_baseline)
+        return 0
+
+    earliest = await db.earliest_equity_at()
+    if earliest and earliest <= first_at:
+        await _purge_understated_equity(db, mtm_baseline)
+        return 0
 
     try:
         start_dt = datetime.fromisoformat(first_at.replace("Z", "+00:00")) - timedelta(seconds=1)
@@ -151,6 +139,15 @@ async def backfill_equity_from_trades(
 
     await _purge_understated_equity(db, mtm_baseline)
     return written
+
+
+async def purge_backfill_equity(db: Database) -> int:
+    """Drop reconstructed backfill points once live snapshots exist."""
+    cur = await db.conn.execute(
+        "DELETE FROM paper_equity WHERE note LIKE 'backfill%'"
+    )
+    await db.conn.commit()
+    return int(cur.rowcount or 0)
 
 
 async def _purge_understated_equity(db: Database, mtm_baseline: float) -> None:

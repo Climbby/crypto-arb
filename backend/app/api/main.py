@@ -23,7 +23,12 @@ from app.engine.triangular import triangular_symbols
 from app.feeds.poller import PriceFeed, TickStore
 from app.paper.auto import AutoPaperTrader
 from app.paper.broker import PaperBroker, PaperBrokerError
-from app.paper.equity import backfill_equity_from_trades, mark_equity_by_venue, mark_equity_usdt
+from app.paper.equity import (
+    backfill_equity_from_trades,
+    mark_equity_by_venue,
+    mark_equity_usdt,
+    purge_backfill_equity,
+)
 from app.paper.rebalance import AutoRebalancer
 
 logging.basicConfig(level=logging.INFO)
@@ -120,6 +125,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         notional_usdt=settings.auto_paper_notional_usdt,
         cooldown_seconds=settings.auto_rebalance_cooldown_seconds,
         usdt_chunk=settings.auto_rebalance_usdt_chunk,
+        max_transfers_per_scan=4,
+        coin_floors={k: v * 0.4 for k, v in broker.seed_coins.items()},
     )
     manager = ConnectionManager()
 
@@ -225,7 +232,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if fills and transfers:
                 note = "fill+rebalance"
             await snapshot_equity(ticks, note=note)
-        elif int(state["scan_count"]) % 5 == 0:
+        elif int(state["scan_count"]) % 60 == 0:
+            # ~every 30–60s depending on feed rate — denser heartbeats ate retention
             await snapshot_equity(ticks, note="heartbeat")
 
         await manager.broadcast(
@@ -248,7 +256,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     pruned = await db.prune_opportunities(keep=8000)
                     if pruned:
                         logger.info("Pruned %s old opportunity snapshots", pruned)
-                    eq_pruned = await db.prune_equity(keep=4000)
+                    eq_pruned = await db.prune_equity(keep=20_000)
                     if eq_pruned:
                         logger.info("Pruned %s old equity snapshots", eq_pruned)
 
@@ -256,6 +264,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         await db.connect()
         await broker.ensure_seeded()
+        purged = await purge_backfill_equity(db)
+        if purged:
+            logger.info("Purged %s spike-prone backfill equity rows", purged)
         existing = await db.list_equity(limit=1)
         if not existing:
             await db.record_equity(
@@ -428,7 +439,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         from app.models import utcnow
 
         rows = await db.list_equity(
-            limit=min(max(limit, 10), 2000),
+            limit=min(max(limit, 10), 5000),
             hours=hours if hours and hours > 0 else None,
         )
         ticks = await store.snapshot()

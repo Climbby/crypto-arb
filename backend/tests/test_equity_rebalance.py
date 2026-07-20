@@ -67,11 +67,15 @@ async def test_backfill_from_trades(broker: PaperBroker):
         realized_pnl_usdt=float(portfolio["realized_pnl_usdt"]),
     )
     assert written >= 2
-    rows = await broker.db.list_equity(limit=50)
-    notes = [r["note"] for r in rows]
+    cur = await broker.db.conn.execute(
+        "SELECT note FROM paper_equity WHERE note LIKE 'backfill%' ORDER BY id ASC"
+    )
+    notes = [r["note"] for r in await cur.fetchall()]
     assert "backfill:start" in notes
     assert "backfill:trade" in notes
-    assert rows[0]["note"].startswith("backfill")
+    # Chart API hides backfill; raw rows must still exist for one-shot reconstruction
+    chart = await broker.db.list_equity(limit=50)
+    assert all(not str(r.get("note") or "").startswith("backfill") for r in chart)
 
 
 @pytest.mark.asyncio

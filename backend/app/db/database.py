@@ -443,6 +443,7 @@ class Database:
                 """
                 SELECT * FROM paper_equity
                 WHERE recorded_at >= ?
+                  AND COALESCE(note, '') NOT LIKE 'backfill%'
                 ORDER BY recorded_at DESC, id DESC
                 LIMIT ?
                 """,
@@ -452,6 +453,7 @@ class Database:
             cur = await self.conn.execute(
                 """
                 SELECT * FROM paper_equity
+                WHERE COALESCE(note, '') NOT LIKE 'backfill%'
                 ORDER BY recorded_at DESC, id DESC
                 LIMIT ?
                 """,
@@ -478,17 +480,29 @@ class Database:
         await self.conn.execute("DELETE FROM paper_equity")
         await self.conn.commit()
 
-    async def prune_equity(self, keep: int = 4000) -> int:
-        cur = await self.conn.execute("SELECT COUNT(*) AS c FROM paper_equity")
+    async def prune_equity(self, keep: int = 20_000) -> int:
+        """Keep newest `keep` non-backfill rows; always drop backfill debris."""
+        await self.conn.execute(
+            "DELETE FROM paper_equity WHERE note LIKE 'backfill%'"
+        )
+        cur = await self.conn.execute(
+            """
+            SELECT COUNT(*) AS c FROM paper_equity
+            WHERE COALESCE(note, '') NOT LIKE 'backfill%'
+            """
+        )
         row = await cur.fetchone()
         count = int(row["c"]) if row else 0
         if count <= keep:
+            await self.conn.commit()
             return 0
         drop = count - keep
         await self.conn.execute(
             """
             DELETE FROM paper_equity WHERE id IN (
-              SELECT id FROM paper_equity ORDER BY id ASC LIMIT ?
+              SELECT id FROM paper_equity
+              WHERE COALESCE(note, '') NOT LIKE 'backfill%'
+              ORDER BY id ASC LIMIT ?
             )
             """,
             (drop,),
