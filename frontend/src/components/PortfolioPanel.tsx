@@ -59,15 +59,34 @@ export function PortfolioPanel({ portfolio, onChange, refreshKey = 0 }: Props) {
     }
   }, [equityHist])
 
-  const equityData: ChartDatum[] = useMemo(
-    () =>
-      equityHist.map((p) => ({
-        y: p.equity_usdt,
-        label: `${new Date(p.recorded_at).toLocaleString()}${p.note ? ` · ${p.note}` : ''}`,
-        valueLabel: `${p.equity_usdt.toFixed(2)} USDT`,
-      })),
-    [equityHist],
-  )
+  const equityData: ChartDatum[] = useMemo(() => {
+    const shortTime = (iso: string) => {
+      const d = new Date(iso)
+      if (hours == null || hours >= 168) {
+        return d.toLocaleString(undefined, {
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        })
+      }
+      if (hours >= 24) {
+        return d.toLocaleString(undefined, {
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        })
+      }
+      return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+    }
+    return equityHist.map((p) => ({
+      y: p.equity_usdt,
+      axisLabel: shortTime(p.recorded_at),
+      label: `${new Date(p.recorded_at).toLocaleString()}${p.note ? ` · ${p.note}` : ''}`,
+      valueLabel: p.equity_usdt.toFixed(2),
+    }))
+  }, [equityHist, hours])
 
   async function reset() {
     setBusy(true)
@@ -149,8 +168,16 @@ export function PortfolioPanel({ portfolio, onChange, refreshKey = 0 }: Props) {
         {equityData.length >= 2 ? (
           <HoverLineChart
             data={equityData}
+            height={180}
             ariaLabel="Paper equity over time"
             className="rounded border border-[var(--border)]/40 bg-[var(--bg)]/30"
+            showLevels
+            formatLevel={(v) =>
+              v.toLocaleString(undefined, {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })
+            }
           />
         ) : (
           <p className="m-0 text-sm text-[var(--muted)]">
