@@ -44,6 +44,77 @@ function niceTicks(min: number, max: number, count: number): number[] {
   return ticks
 }
 
+const TIME_STEPS_MS = [
+  60_000, // 1m
+  5 * 60_000,
+  15 * 60_000,
+  30 * 60_000,
+  60 * 60_000, // 1h
+  2 * 60 * 60_000,
+  3 * 60 * 60_000,
+  4 * 60 * 60_000,
+  6 * 60 * 60_000,
+  12 * 60 * 60_000,
+  24 * 60 * 60_000,
+] as const
+
+/** Floor a timestamp to a local-time boundary for the given step. */
+function floorTimeToStep(ms: number, stepMs: number): number {
+  const d = new Date(ms)
+  if (stepMs >= 24 * 60 * 60_000) {
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  }
+  if (stepMs >= 60 * 60_000) {
+    const hours = stepMs / (60 * 60_000)
+    const h = Math.floor(d.getHours() / hours) * hours
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate(), h, 0, 0, 0).getTime()
+  }
+  const mins = stepMs / 60_000
+  const m = Math.floor(d.getMinutes() / mins) * mins
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), m, 0, 0).getTime()
+}
+
+function addTimeStep(ms: number, stepMs: number): number {
+  const d = new Date(ms)
+  if (stepMs >= 24 * 60 * 60_000) {
+    d.setDate(d.getDate() + Math.round(stepMs / (24 * 60 * 60_000)))
+    return d.getTime()
+  }
+  if (stepMs >= 60 * 60_000) {
+    d.setHours(d.getHours() + Math.round(stepMs / (60 * 60_000)))
+    return d.getTime()
+  }
+  d.setMinutes(d.getMinutes() + Math.round(stepMs / 60_000))
+  return d.getTime()
+}
+
+/**
+ * Even clock-aligned time ticks (e.g. 14:00, 16:00) instead of raw span/n
+ * offsets like every 2h24m.
+ */
+function niceTimeTicks(t0: number, t1: number, maxCount: number): number[] {
+  if (!(t1 > t0)) return [t0]
+  const span = t1 - t0
+  const ideal = span / Math.max(maxCount - 1, 1)
+  let step = TIME_STEPS_MS.find((s) => s >= ideal) ?? TIME_STEPS_MS[TIME_STEPS_MS.length - 1]
+  // If that still yields too many labels, bump to the next coarser step
+  let idx = TIME_STEPS_MS.indexOf(step as (typeof TIME_STEPS_MS)[number])
+  while (idx < TIME_STEPS_MS.length - 1 && span / step > maxCount) {
+    idx += 1
+    step = TIME_STEPS_MS[idx]
+  }
+
+  let t = floorTimeToStep(t0, step)
+  if (t < t0) t = addTimeStep(t, step)
+
+  const ticks: number[] = []
+  for (let guard = 0; t <= t1 + 1 && guard < 64; guard++) {
+    if (t >= t0) ticks.push(t)
+    t = addTimeStep(t, step)
+  }
+  return ticks.length > 0 ? ticks : [t0, t1]
+}
+
 const LEVEL_META: Record<
   LevelKind,
   { title: string; line: 'solid' | 'dash'; emphasis: boolean }
@@ -148,14 +219,14 @@ export function HoverLineChart({
         )
       : []
 
-    const xTickCount = Math.min(6, Math.max(2, Math.floor(plotW / 72)))
+    const xTickCount = Math.min(6, Math.max(2, Math.floor(plotW / 80)))
     const xTicks: { x: number; label: string }[] = []
     if (showLevels && data.length >= 2) {
       if (useTime) {
-        for (let i = 0; i < xTickCount; i++) {
-          const ms = t0 + (i / (xTickCount - 1)) * tSpan
+        for (const ms of niceTimeTicks(t0, t1, xTickCount)) {
           const x = xAtTime(ms)
-          if (xTicks.some((t) => Math.abs(t.x - x) < 28)) continue
+          if (x < padL - 1 || x > padL + plotW + 1) continue
+          if (xTicks.some((tick) => Math.abs(tick.x - x) < 36)) continue
           xTicks.push({ x, label: formatTimeAxis(ms) })
         }
       } else {
@@ -166,7 +237,7 @@ export function HoverLineChart({
               : Math.round((i / (xTickCount - 1)) * (data.length - 1))
           const p = points[idx]
           if (!p.axisLabel) continue
-          if (xTicks.some((t) => Math.abs(t.x - p.x) < 28)) continue
+          if (xTicks.some((tick) => Math.abs(tick.x - p.x) < 36)) continue
           xTicks.push({ x: p.x, label: p.axisLabel })
         }
       }

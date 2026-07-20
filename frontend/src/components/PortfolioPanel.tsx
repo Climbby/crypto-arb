@@ -66,7 +66,10 @@ export function PortfolioPanel({ portfolio, onChange: _onChange, refreshKey = 0 
           minute: '2-digit',
         })
       }
-      return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+      return d.toLocaleTimeString(undefined, {
+        hour: '2-digit',
+        minute: '2-digit',
+      })
     }
   }, [hours])
 
