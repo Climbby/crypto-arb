@@ -15,7 +15,7 @@ export function SettingsPanel({ onSaved }: Props) {
   const [symbols, setSymbols] = useState('BTC/USDT,ETH/USDT,SOL/USDT')
   const [starting, setStarting] = useState(10000)
   const [autoEnabled, setAutoEnabled] = useState(true)
-  const [autoNotional, setAutoNotional] = useState(100)
+  const [autoNotional, setAutoNotional] = useState(400)
   const [autoMinEdge, setAutoMinEdge] = useState('')
   const [autoCooldown, setAutoCooldown] = useState(12)
   const [autoMaxScan, setAutoMaxScan] = useState(3)
