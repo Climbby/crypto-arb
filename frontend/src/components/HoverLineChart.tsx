@@ -29,6 +29,8 @@ type Props = {
    */
   timeDomain?: { startMs: number; endMs: number } | null
   formatTimeAxis?: (ms: number) => string
+  /** Vertical event markers on the time axis (e.g. realism regime change) */
+  markers?: { t: number; label: string }[] | null
 }
 
 function niceTicks(min: number, max: number, count: number): number[] {
@@ -140,6 +142,7 @@ export function HoverLineChart({
   timeDomain = null,
   formatTimeAxis = (ms) =>
     new Date(ms).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }),
+  markers = null,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
@@ -243,6 +246,14 @@ export function HoverLineChart({
       }
     }
 
+    const markerLines: { x: number; label: string }[] = []
+    if (useTime && markers?.length) {
+      for (const m of markers) {
+        if (m.t < t0 || m.t > t1) continue
+        markerLines.push({ x: xAtTime(m.t), label: m.label })
+      }
+    }
+
     return {
       padL,
       padR,
@@ -255,10 +266,11 @@ export function HoverLineChart({
       levels: kept,
       grid,
       xTicks,
+      markerLines,
       points,
       polyline: points.map((p) => `${p.x},${p.y}`).join(' '),
     }
-  }, [data, width, height, showLevels, currentValue, timeDomain, formatTimeAxis])
+  }, [data, width, height, showLevels, currentValue, timeDomain, formatTimeAxis, markers])
 
   const onMove = useCallback(
     (ev: React.MouseEvent<HTMLDivElement>) => {
@@ -350,6 +362,22 @@ export function HoverLineChart({
               )
             })}
 
+          {showLevels &&
+            layout.markerLines.map((m) => (
+              <line
+                key={`m-${m.x}-${m.label}`}
+                x1={m.x}
+                x2={m.x}
+                y1={layout.padT}
+                y2={height - layout.padB}
+                stroke="var(--warn)"
+                strokeWidth="1.25"
+                strokeDasharray="4 3"
+                opacity={0.85}
+                vectorEffect="non-scaling-stroke"
+              />
+            ))}
+
           <polyline
             fill="none"
             stroke="var(--accent)"
@@ -438,6 +466,21 @@ export function HoverLineChart({
               }}
             >
               {t.label}
+            </div>
+          ))}
+
+          {layout.markerLines.map((m) => (
+            <div
+              key={`ml-${m.x}-${m.label}`}
+              className="pointer-events-none absolute z-[1] max-w-[7rem] truncate rounded bg-[var(--bg-panel)] px-1 py-0.5 text-[9px] font-medium leading-none text-[var(--warn)] ring-1 ring-[var(--warn)]/40"
+              style={{
+                left: Math.min(Math.max(40, m.x), Math.max(40, width - 40)),
+                top: 4,
+                transform: 'translateX(-50%)',
+              }}
+              title={m.label}
+            >
+              {m.label}
             </div>
           ))}
         </>

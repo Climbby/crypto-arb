@@ -26,6 +26,9 @@ type VenueEquity = {
 const TRADE_LOG_LIMIT = 40
 const TRANSFER_LOG_LIMIT = 20
 
+/** When paper realism tightened (transfer delays, fees, fill slippage). */
+const REALISM_SINCE_MS = Date.parse('2026-07-20T19:00:18.000Z')
+
 export function PortfolioPanel({ portfolio, onChange: _onChange, refreshKey = 0 }: Props) {
   const [equityNow, setEquityNow] = useState<number | null>(null)
   const [pnlNow, setPnlNow] = useState<number | null>(null)
@@ -106,6 +109,14 @@ export function PortfolioPanel({ portfolio, onChange: _onChange, refreshKey = 0 
     return { startMs: first, endMs }
   }, [chartData, hours])
 
+  const chartMarkers = useMemo(() => {
+    if (!timeDomain) return null
+    if (REALISM_SINCE_MS < timeDomain.startMs || REALISM_SINCE_MS > timeDomain.endMs) {
+      return null
+    }
+    return [{ t: REALISM_SINCE_MS, label: 'Stricter realism' }]
+  }, [timeDomain])
+
   const liveCurrent =
     chartTab === 'equity'
       ? (equityNow ?? (chartData.length ? chartData[chartData.length - 1].y : null))
@@ -121,6 +132,12 @@ export function PortfolioPanel({ portfolio, onChange: _onChange, refreshKey = 0 
   const dayPnl = last24h?.realized_pnl_usdt
   const dayPct = last24h?.pct
   const dayPositive = dayPnl == null ? true : dayPnl >= 0
+  const realismSinceLabel = new Date(REALISM_SINCE_MS).toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 
   const trades = (portfolio?.trades ?? []).slice(0, TRADE_LOG_LIMIT)
   const transfers = (portfolio?.transfers ?? []).slice(0, TRANSFER_LOG_LIMIT)
@@ -160,6 +177,15 @@ export function PortfolioPanel({ portfolio, onChange: _onChange, refreshKey = 0 
               </span>
             </>
           ) : null}
+        </p>
+        <p className="m-0 mt-2 rounded border border-[var(--warn)]/35 bg-[var(--warn)]/10 px-2.5 py-1.5 text-[11px] leading-snug text-[var(--text)]">
+          <span className="font-medium text-[var(--warn)]">Stricter paper realism</span>
+          {' since '}
+          {realismSinceLabel}
+          {'. '}
+          Before that, transfers were instant and fills ignored slippage — earlier PnL is
+          optimistic. After: withdraw delays (USDT~3m → BTC~30m), burn fees in transit, and
+          fill slippage. Still paper (no depth/latency). Lifetime totals mix both regimes.
         </p>
       </div>
 
@@ -222,6 +248,7 @@ export function PortfolioPanel({ portfolio, onChange: _onChange, refreshKey = 0 
             formatLevel={formatMoney}
             timeDomain={timeDomain}
             formatTimeAxis={shortTime}
+            markers={chartMarkers}
           />
         ) : (
           <p className="m-0 text-sm text-[var(--muted)]">
