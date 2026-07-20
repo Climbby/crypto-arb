@@ -31,6 +31,10 @@ export function PortfolioPanel({ portfolio, onChange: _onChange, refreshKey = 0 
   const [pnlNow, setPnlNow] = useState<number | null>(null)
   const [equityHist, setEquityHist] = useState<EquityPoint[]>([])
   const [venues, setVenues] = useState<Record<string, VenueEquity>>({})
+  const [last24h, setLast24h] = useState<{
+    realized_pnl_usdt: number
+    pct: number | null
+  } | null>(null)
   const [hours, setHours] = useState<number | null>(null)
   const [chartTab, setChartTab] = useState<ChartTab>('equity')
 
@@ -44,6 +48,7 @@ export function PortfolioPanel({ portfolio, onChange: _onChange, refreshKey = 0 
         setPnlNow(r.current.realized_pnl_usdt)
         setEquityHist(r.history)
         setVenues(r.venues ?? {})
+        setLast24h(r.last_24h ?? null)
       })
       .catch(() => {
         /* ignore */
@@ -109,6 +114,11 @@ export function PortfolioPanel({ portfolio, onChange: _onChange, refreshKey = 0 
       maximumFractionDigits: 2,
     })
 
+  const realized = portfolio?.realized_pnl_usdt ?? pnlNow ?? 0
+  const dayPnl = last24h?.realized_pnl_usdt
+  const dayPct = last24h?.pct
+  const dayPositive = dayPnl == null ? true : dayPnl >= 0
+
   const trades = (portfolio?.trades ?? []).slice(0, TRADE_LOG_LIMIT)
   const transfers = (portfolio?.transfers ?? []).slice(0, TRANSFER_LOG_LIMIT)
 
@@ -118,14 +128,35 @@ export function PortfolioPanel({ portfolio, onChange: _onChange, refreshKey = 0 
         <h2 className="m-0 text-lg font-medium">Paper portfolio</h2>
         <p className="m-0 mt-1 text-xs text-[var(--muted)]">
           Marked equity:{' '}
-          <span className="text-[var(--accent)]">
-            {(equityNow ?? 0).toFixed(2)} USDT
+          <span className="text-[var(--accent)] tabular-nums">
+            {formatMoney(equityNow ?? 0)} USDT
           </span>
           {' · '}
-          Realized PnL:{' '}
-          <span className="text-[var(--accent)]">
-            {(portfolio?.realized_pnl_usdt ?? pnlNow ?? 0).toFixed(4)} USDT
+          Realized PnL{' '}
+          <span className="text-[var(--accent)] tabular-nums">
+            {realized >= 0 ? '+' : ''}
+            {formatMoney(realized)} USDT
           </span>
+          {dayPnl != null ? (
+            <>
+              {' · '}
+              Last 24h profit{' '}
+              <span
+                className={`tabular-nums ${
+                  dayPositive ? 'text-[var(--accent)]' : 'text-[var(--danger)]'
+                }`}
+              >
+                {dayPositive ? '+' : '-'}${formatMoney(Math.abs(dayPnl))}
+                {dayPct != null ? (
+                  <>
+                    {' '}
+                    ({dayPositive ? '+' : ''}
+                    {dayPct.toFixed(2)}%)
+                  </>
+                ) : null}
+              </span>
+            </>
+          ) : null}
         </p>
       </div>
 

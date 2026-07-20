@@ -227,6 +227,11 @@ export const api = {
     return request<{
       current: { equity_usdt: number; usdt_total: number; realized_pnl_usdt: number }
       venues?: Record<string, { equity_usdt: number; daily_pct: number | null }>
+      last_24h?: {
+        realized_pnl_usdt: number
+        pct: number | null
+        from_recorded_at?: string
+      } | null
       history: EquityPoint[]
       hours?: number | null
       auto_rebalance?: AppSettings['auto_rebalance']

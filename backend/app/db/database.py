@@ -562,6 +562,21 @@ class Database:
             return None
         return {str(k): float(v) for k, v in data.items()}
 
+    async def equity_snapshot_at_or_before(self, iso: str) -> dict[str, Any] | None:
+        cur = await self.conn.execute(
+            """
+            SELECT equity_usdt, realized_pnl_usdt, usdt_total, recorded_at
+            FROM paper_equity
+            WHERE COALESCE(note, '') NOT LIKE 'backfill%'
+              AND recorded_at <= ?
+            ORDER BY recorded_at DESC, id DESC
+            LIMIT 1
+            """,
+            (iso,),
+        )
+        row = await cur.fetchone()
+        return dict(row) if row else None
+
     async def list_equity(
         self, limit: int = 500, hours: float | None = None
     ) -> list[dict[str, Any]]:
