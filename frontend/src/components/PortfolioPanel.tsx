@@ -51,8 +51,8 @@ export function PortfolioPanel({ portfolio, onChange: _onChange, refreshKey = 0 
   }, [refreshKey, hours, portfolio?.realized_pnl_usdt, portfolio?.trades.length])
 
   const shortTime = useMemo(() => {
-    return (iso: string) => {
-      const d = new Date(iso)
+    return (isoOrMs: string | number) => {
+      const d = typeof isoOrMs === 'number' ? new Date(isoOrMs) : new Date(isoOrMs)
       if (hours == null || hours >= 24) {
         return d.toLocaleString(undefined, {
           month: 'short',
@@ -69,11 +69,23 @@ export function PortfolioPanel({ portfolio, onChange: _onChange, refreshKey = 0 
     const key = chartTab === 'equity' ? 'equity_usdt' : 'realized_pnl_usdt'
     return equityHist.map((p) => ({
       y: p[key],
+      t: new Date(p.recorded_at).getTime(),
       axisLabel: shortTime(p.recorded_at),
       label: `${new Date(p.recorded_at).toLocaleString()}${p.note ? ` · ${p.note}` : ''}`,
       valueLabel: p[key].toFixed(2),
     }))
   }, [equityHist, chartTab, shortTime])
+
+  const timeDomain = useMemo(() => {
+    if (chartData.length < 2) return null
+    const endMs = Date.now()
+    if (hours != null && hours > 0) {
+      return { startMs: endMs - hours * 3600_000, endMs }
+    }
+    const first = chartData[0].t
+    if (first == null) return null
+    return { startMs: first, endMs }
+  }, [chartData, hours])
 
   const liveCurrent =
     chartTab === 'equity'
@@ -163,6 +175,8 @@ export function PortfolioPanel({ portfolio, onChange: _onChange, refreshKey = 0 
             showLevels
             currentValue={liveCurrent}
             formatLevel={formatMoney}
+            timeDomain={timeDomain}
+            formatTimeAxis={shortTime}
           />
         ) : (
           <p className="m-0 text-sm text-[var(--muted)]">

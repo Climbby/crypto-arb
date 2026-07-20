@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 export type ChartDatum = {
   y: number
-  /** Short label for the bottom time axis */
+  /** Epoch ms for time-scaled X axis (preferred when timeDomain is set) */
+  t?: number
+  /** Short label for the bottom time axis (fallback when not using timeDomain) */
   axisLabel?: string
   /** Kept for callers; unused when showLevels (hover shows price only) */
   label: string
@@ -21,6 +23,12 @@ type Props = {
   formatLevel?: (value: number) => string
   /** Optional live current (overrides last point for the Current tag) */
   currentValue?: number | null
+  /**
+   * Fixed time window for the X axis (TradingView-style).
+   * Points are placed by timestamp; axis ticks span this domain even if data is shorter.
+   */
+  timeDomain?: { startMs: number; endMs: number } | null
+  formatTimeAxis?: (ms: number) => string
 }
 
 function niceTicks(min: number, max: number, count: number): number[] {
@@ -58,6 +66,9 @@ export function HoverLineChart({
   showLevels = false,
   formatLevel = (v) => v.toFixed(2),
   currentValue = null,
+  timeDomain = null,
+  formatTimeAxis = (ms) =>
+    new Date(ms).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }),
 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
@@ -89,15 +100,25 @@ export function HoverLineChart({
     const start = ys[0]
     const end = ys[ys.length - 1]
     const current = currentValue != null && Number.isFinite(currentValue) ? currentValue : end
-    // Expand scale so Current stays on-plot when live value is outside history
     const plotMin = Math.min(min, current)
     const plotMax = Math.max(max, current)
     const span = Math.max(plotMax - plotMin, 1e-9)
-    const step = plotW / Math.max(data.length - 1, 1)
+
+    const useTime =
+      Boolean(timeDomain) &&
+      data.every((d) => typeof d.t === 'number' && Number.isFinite(d.t))
+    const t0 = useTime ? timeDomain!.startMs : 0
+    const t1 = useTime ? Math.max(timeDomain!.endMs, t0 + 1) : 1
+    const tSpan = t1 - t0
 
     const yAt = (v: number) => padT + plotH - ((v - plotMin) / span) * plotH
+    const xAtIndex = (i: number) => padL + (i / Math.max(data.length - 1, 1)) * plotW
+    const xAtTime = (t: number) => padL + ((t - t0) / tSpan) * plotW
+
     const points = data.map((d, i) => ({
-      x: padL + i * step,
+      x: useTime
+        ? Math.min(padL + plotW, Math.max(padL, xAtTime(d.t as number)))
+        : xAtIndex(i),
       y: yAt(d.y),
       value: d.y,
       axisLabel: d.axisLabel ?? '',
@@ -112,7 +133,6 @@ export function HoverLineChart({
       { key: 'low', value: min },
     ]
 
-    // Always keep High / Low / Current. Drop Start only if it collides with those.
     const kept: typeof levels = levels.filter((lv) => {
       if (lv.key !== 'start') return true
       return !['high', 'low', 'current'].some(
@@ -131,15 +151,24 @@ export function HoverLineChart({
     const xTickCount = Math.min(6, Math.max(2, Math.floor(plotW / 72)))
     const xTicks: { x: number; label: string }[] = []
     if (showLevels && data.length >= 2) {
-      for (let i = 0; i < xTickCount; i++) {
-        const idx =
-          xTickCount === 1
-            ? 0
-            : Math.round((i / (xTickCount - 1)) * (data.length - 1))
-        const p = points[idx]
-        if (!p.axisLabel) continue
-        if (xTicks.some((t) => Math.abs(t.x - p.x) < 28)) continue
-        xTicks.push({ x: p.x, label: p.axisLabel })
+      if (useTime) {
+        for (let i = 0; i < xTickCount; i++) {
+          const ms = t0 + (i / (xTickCount - 1)) * tSpan
+          const x = xAtTime(ms)
+          if (xTicks.some((t) => Math.abs(t.x - x) < 28)) continue
+          xTicks.push({ x, label: formatTimeAxis(ms) })
+        }
+      } else {
+        for (let i = 0; i < xTickCount; i++) {
+          const idx =
+            xTickCount === 1
+              ? 0
+              : Math.round((i / (xTickCount - 1)) * (data.length - 1))
+          const p = points[idx]
+          if (!p.axisLabel) continue
+          if (xTicks.some((t) => Math.abs(t.x - p.x) < 28)) continue
+          xTicks.push({ x: p.x, label: p.axisLabel })
+        }
       }
     }
 
@@ -158,7 +187,7 @@ export function HoverLineChart({
       points,
       polyline: points.map((p) => `${p.x},${p.y}`).join(' '),
     }
-  }, [data, width, height, showLevels, currentValue])
+  }, [data, width, height, showLevels, currentValue, timeDomain, formatTimeAxis])
 
   const onMove = useCallback(
     (ev: React.MouseEvent<HTMLDivElement>) => {
