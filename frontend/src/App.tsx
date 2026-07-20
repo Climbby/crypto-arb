@@ -46,12 +46,12 @@ export default function App() {
       />
 
       <main className="mt-8 flex flex-col gap-6">
-        <TradingViewChart theme={theme} />
         <PortfolioPanel
           portfolio={portfolio}
           onChange={refreshPaper}
           refreshKey={historyKey + autoFillSeq}
         />
+        <TradingViewChart theme={theme} />
         <PricesAndHistory prices={prices} refreshKey={historyKey} />
         <SettingsPanel onSaved={refreshPaper} />
       </main>
