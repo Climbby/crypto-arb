@@ -373,15 +373,38 @@ export function HoverLineChart({
       )}
 
       {active && showLevels && layout && (
-        <div
-          className="pointer-events-none absolute z-[2] rounded bg-[var(--accent)] px-1.5 py-0.5 text-[10px] font-medium tabular-nums leading-none text-[var(--on-accent)]"
-          style={{
-            right: 4,
-            top: Math.max(2, Math.min(height - 16, active.y - 7)),
-          }}
-        >
-          {formatLevel(active.value)}
-        </div>
+        <>
+          <div
+            className="pointer-events-none absolute z-[2] rounded bg-[var(--accent)] px-1.5 py-0.5 text-[10px] font-medium tabular-nums leading-none text-[var(--on-accent)]"
+            style={{
+              right: 4,
+              top: Math.max(2, Math.min(height - 16, active.y - 7)),
+            }}
+          >
+            {formatLevel(active.value)}
+          </div>
+          <div
+            className="pointer-events-none absolute z-[2] whitespace-nowrap rounded border border-[var(--border)] bg-[var(--bg-panel)] px-1.5 py-0.5 text-[10px] tabular-nums leading-none text-[var(--text)] shadow-sm"
+            style={{
+              left: Math.min(Math.max(48, active.x), Math.max(48, width - 48)),
+              top: 6,
+              transform: 'translateX(-50%)',
+            }}
+          >
+            <span className="font-medium">{formatLevel(active.value)}</span>
+            <span className="text-[var(--muted)]"> · {active.label || active.axisLabel}</span>
+          </div>
+          <div
+            className="pointer-events-none absolute z-[2] whitespace-nowrap rounded bg-[var(--bg-panel)] px-1 py-0.5 text-[10px] font-medium tabular-nums leading-none text-[var(--accent)] ring-1 ring-[var(--accent)]/40"
+            style={{
+              left: Math.min(Math.max(36, active.x), Math.max(36, width - 36)),
+              bottom: 2,
+              transform: 'translateX(-50%)',
+            }}
+          >
+            {active.axisLabel || active.label}
+          </div>
+        </>
       )}
 
       {active && !showLevels && (

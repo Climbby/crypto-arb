@@ -65,16 +65,27 @@ export function PortfolioPanel({ portfolio, onChange: _onChange, refreshKey = 0 
     }
   }, [hours])
 
+  const hoverTime = useMemo(() => {
+    return (iso: string) =>
+      new Date(iso).toLocaleString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      })
+  }, [])
+
   const chartData: ChartDatum[] = useMemo(() => {
     const key = chartTab === 'equity' ? 'equity_usdt' : 'realized_pnl_usdt'
     return equityHist.map((p) => ({
       y: p[key],
       t: new Date(p.recorded_at).getTime(),
       axisLabel: shortTime(p.recorded_at),
-      label: `${new Date(p.recorded_at).toLocaleString()}${p.note ? ` · ${p.note}` : ''}`,
+      label: hoverTime(p.recorded_at),
       valueLabel: p[key].toFixed(2),
     }))
-  }, [equityHist, chartTab, shortTime])
+  }, [equityHist, chartTab, shortTime, hoverTime])
 
   const timeDomain = useMemo(() => {
     if (chartData.length < 2) return null
