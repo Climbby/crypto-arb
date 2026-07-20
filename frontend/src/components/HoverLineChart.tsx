@@ -340,7 +340,7 @@ export function HoverLineChart({
                 key={lv.key}
                 className={`pointer-events-none absolute z-[1] max-w-[112px] truncate rounded px-1 py-0.5 text-[10px] tabular-nums leading-none ${
                   meta.emphasis
-                    ? 'bg-[var(--accent)] font-medium text-[#062016]'
+                    ? 'bg-[var(--accent)] font-medium text-[var(--on-accent)]'
                     : 'bg-[var(--bg-panel)] text-[var(--muted)] ring-1 ring-[var(--border)]'
                 }`}
                 style={{
@@ -374,7 +374,7 @@ export function HoverLineChart({
 
       {active && showLevels && layout && (
         <div
-          className="pointer-events-none absolute z-[2] rounded bg-[var(--accent)] px-1.5 py-0.5 text-[10px] font-medium tabular-nums leading-none text-[#062016]"
+          className="pointer-events-none absolute z-[2] rounded bg-[var(--accent)] px-1.5 py-0.5 text-[10px] font-medium tabular-nums leading-none text-[var(--on-accent)]"
           style={{
             right: 4,
             top: Math.max(2, Math.min(height - 16, active.y - 7)),

@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
+import type { Theme } from '../hooks/useTheme'
 
 declare global {
   interface Window {
@@ -43,7 +44,11 @@ function loadTradingViewScript(): Promise<void> {
   return tvScriptPromise
 }
 
-export function TradingViewChart() {
+type Props = {
+  theme?: Theme
+}
+
+export function TradingViewChart({ theme = 'dark' }: Props) {
   const reactId = useId().replace(/:/g, '')
   const containerId = `tv_chart_${reactId}`
   const containerRef = useRef<HTMLDivElement>(null)
@@ -52,6 +57,7 @@ export function TradingViewChart() {
   const [error, setError] = useState<string | null>(null)
 
   const tvSymbol = venue.tv(pair.base)
+  const isLight = theme === 'light'
 
   useEffect(() => {
     let cancelled = false
@@ -72,17 +78,17 @@ export function TradingViewChart() {
           symbol: tvSymbol,
           interval: '15',
           timezone: 'Etc/UTC',
-          theme: 'dark',
+          theme: isLight ? 'light' : 'dark',
           style: '1',
           locale: 'en',
-          toolbar_bg: '#121a24',
+          toolbar_bg: isLight ? '#ffffff' : '#121a24',
           enable_publishing: false,
           hide_top_toolbar: false,
           hide_legend: false,
           save_image: false,
           container_id: containerId,
-          backgroundColor: '#0c1117',
-          gridColor: 'rgba(36, 48, 65, 0.6)',
+          backgroundColor: isLight ? '#f3f6f9' : '#0c1117',
+          gridColor: isLight ? 'rgba(208, 218, 230, 0.9)' : 'rgba(36, 48, 65, 0.6)',
           allow_symbol_change: true,
           withdateranges: true,
         })
@@ -97,7 +103,7 @@ export function TradingViewChart() {
       cancelled = true
       if (containerRef.current) containerRef.current.innerHTML = ''
     }
-  }, [tvSymbol, containerId])
+  }, [tvSymbol, containerId, isLight])
 
   return (
     <section className="rounded-lg border border-[var(--border)] bg-[var(--bg-panel)]/80 p-4">

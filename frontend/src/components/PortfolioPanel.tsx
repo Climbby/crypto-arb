@@ -139,7 +139,7 @@ export function PortfolioPanel({ portfolio, onChange: _onChange, refreshKey = 0 
                 onClick={() => setChartTab(tab.id)}
                 className={`rounded px-2.5 py-1 text-xs font-medium ${
                   chartTab === tab.id
-                    ? 'bg-[var(--accent)] text-[#062016]'
+                    ? 'bg-[var(--accent)] text-[var(--on-accent)]'
                     : 'text-[var(--muted)] hover:text-[var(--text)]'
                 }`}
               >
@@ -155,7 +155,7 @@ export function PortfolioPanel({ portfolio, onChange: _onChange, refreshKey = 0 
                 onClick={() => setHours(r.hours)}
                 className={`rounded px-2 py-0.5 text-xs ${
                   hours === r.hours
-                    ? 'bg-[var(--accent)] text-[#062016]'
+                    ? 'bg-[var(--accent)] text-[var(--on-accent)]'
                     : 'border border-[var(--border)] text-[var(--muted)] hover:text-[var(--text)]'
                 }`}
               >

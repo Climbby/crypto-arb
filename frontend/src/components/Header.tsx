@@ -1,12 +1,21 @@
 import type { AutoPaperStatus } from '../hooks/useOpportunities'
+import type { Theme } from '../hooks/useTheme'
 
 type Props = {
   connected: boolean
   scansLastMinute: number
   autoPaper: AutoPaperStatus | null
+  theme: Theme
+  onToggleTheme: () => void
 }
 
-export function Header({ connected, scansLastMinute, autoPaper }: Props) {
+export function Header({
+  connected,
+  scansLastMinute,
+  autoPaper,
+  theme,
+  onToggleTheme,
+}: Props) {
   const autoLabel = autoPaper?.enabled ? 'Auto paper ON' : 'Auto paper: off'
   const liveTip = connected
     ? `${scansLastMinute} scan${scansLastMinute === 1 ? '' : 's'} last minute`
@@ -22,7 +31,7 @@ export function Header({ connected, scansLastMinute, autoPaper }: Props) {
           Arb<span className="text-[var(--accent)]">Watch</span>
         </h1>
       </div>
-      <div className="flex flex-wrap items-center gap-4 text-sm text-[var(--muted)]">
+      <div className="flex flex-wrap items-center gap-3 text-sm text-[var(--muted)] sm:gap-4">
         <span
           className="inline-flex cursor-default items-center gap-2"
           title={liveTip}
@@ -33,6 +42,15 @@ export function Header({ connected, scansLastMinute, autoPaper }: Props) {
           {connected ? 'Live' : 'Reconnecting'}
         </span>
         <span className={autoPaper?.enabled ? 'text-[var(--accent)]' : ''}>{autoLabel}</span>
+        <button
+          type="button"
+          onClick={onToggleTheme}
+          className="rounded border border-[var(--border)] bg-[var(--bg-panel)] px-2.5 py-1 text-xs text-[var(--text)] hover:border-[var(--accent)]/50"
+          title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+        >
+          {theme === 'dark' ? 'Light' : 'Dark'}
+        </button>
       </div>
     </header>
   )

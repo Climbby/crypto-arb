@@ -6,10 +6,12 @@ import { PricesAndHistory } from './components/PricesAndHistory'
 import { SettingsPanel } from './components/SettingsPanel'
 import { TradingViewChart } from './components/TradingViewChart'
 import { useOpportunities } from './hooks/useOpportunities'
+import { useTheme } from './hooks/useTheme'
 
 export default function App() {
   const { prices, scanCount, scansLastMinute, connected, autoPaper, autoFillSeq } =
     useOpportunities()
+  const { theme, toggleTheme } = useTheme()
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null)
   const [historyKey, setHistoryKey] = useState(0)
 
@@ -39,10 +41,12 @@ export default function App() {
         connected={connected}
         scansLastMinute={scansLastMinute}
         autoPaper={autoPaper}
+        theme={theme}
+        onToggleTheme={toggleTheme}
       />
 
       <main className="mt-8 flex flex-col gap-6">
-        <TradingViewChart />
+        <TradingViewChart theme={theme} />
         <PortfolioPanel
           portfolio={portfolio}
           onChange={refreshPaper}

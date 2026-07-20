@@ -1,6 +1,8 @@
 @import "tailwindcss";
 
-:root {
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
   --bg: #0c1117;
   --bg-elevated: #121a24;
   --bg-panel: #16202c;
@@ -9,10 +11,41 @@
   --muted: #8b9bb0;
   --accent: #3ddc97;
   --accent-dim: #2a9d6e;
+  --on-accent: #062016;
   --warn: #f0b429;
   --danger: #f07178;
   --buy: #3ddc97;
   --sell: #61afef;
+  --scroll-track: #121a24;
+  --scroll-thumb: #2a3a4d;
+  --scroll-thumb-hover: #3d5168;
+  --bg-glow-a: #1a2f28;
+  --bg-glow-b: #1a2438;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f3f6f9;
+  --bg-elevated: #ffffff;
+  --bg-panel: #ffffff;
+  --border: #d0dae6;
+  --text: #15202b;
+  --muted: #5c6b7c;
+  --accent: #1fa971;
+  --accent-dim: #178a5b;
+  --on-accent: #ffffff;
+  --warn: #c48900;
+  --danger: #d64550;
+  --buy: #1fa971;
+  --sell: #2b7de9;
+  --scroll-track: #e8eef4;
+  --scroll-thumb: #b7c4d4;
+  --scroll-thumb-hover: #8fa0b5;
+  --bg-glow-a: #d9eee4;
+  --bg-glow-b: #d6e4f5;
+}
+
+:root {
   font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
   color: var(--text);
   background: var(--bg);
@@ -26,13 +59,45 @@
   box-sizing: border-box;
 }
 
+/* Themed scrollbars (Firefox + Chromium/WebKit) */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb) var(--scroll-track);
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--scroll-track);
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border-radius: 999px;
+  border: 2px solid var(--scroll-track);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--scroll-thumb-hover);
+}
+
+*::-webkit-scrollbar-corner {
+  background: var(--scroll-track);
+}
+
 body {
   margin: 0;
   min-height: 100vh;
   background:
-    radial-gradient(1200px 600px at 10% -10%, #1a2f28 0%, transparent 55%),
-    radial-gradient(900px 500px at 100% 0%, #1a2438 0%, transparent 50%),
+    radial-gradient(1200px 600px at 10% -10%, var(--bg-glow-a) 0%, transparent 55%),
+    radial-gradient(900px 500px at 100% 0%, var(--bg-glow-b) 0%, transparent 50%),
     var(--bg);
+  color: var(--text);
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 #root {
@@ -47,4 +112,6 @@ button {
 input,
 select {
   font: inherit;
+  color: var(--text);
+  background: var(--bg);
 }

@@ -284,7 +284,7 @@ export function SettingsPanel({ onSaved }: Props) {
       <button
         type="button"
         onClick={() => void save()}
-        className="mt-4 rounded bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[#062016]"
+        className="mt-4 rounded bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--on-accent)]"
       >
         Save settings
       </button>
