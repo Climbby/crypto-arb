@@ -102,6 +102,9 @@ export type AppSettings = {
   enable_triangular?: boolean
   feed_modes?: Record<string, string>
   auto_paper_enabled?: boolean
+  auto_paper_notional_pct?: number
+  auto_paper_notional_max_usdt?: number
+  auto_paper_notional_min_usdt?: number
   auto_paper_notional_usdt?: number
   auto_paper_min_net_edge_pct?: number | null
   auto_paper_cooldown_seconds?: number
@@ -112,12 +115,16 @@ export type AppSettings = {
   auto_rebalance_usdt_chunk?: number
   auto_paper?: {
     enabled: boolean
+    notional_pct?: number
+    notional_max_usdt?: number
+    notional_min_usdt?: number
     notional_usdt: number
     fills_total: number
     last_result: {
       ok?: boolean
       opp_id?: string
       symbol?: string
+      notional_usdt?: number
       pnl_usdt?: number
       reason?: string
       at?: number
@@ -190,6 +197,9 @@ export const api = {
     watched_symbols: string[]
     paper_starting_usdt: number
     auto_paper_enabled: boolean
+    auto_paper_notional_pct: number
+    auto_paper_notional_max_usdt: number
+    auto_paper_notional_min_usdt: number
     auto_paper_notional_usdt: number
     auto_paper_min_net_edge_pct: number | null
     auto_paper_cooldown_seconds: number

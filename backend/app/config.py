@@ -22,7 +22,12 @@ class Settings(BaseSettings):
     paper_starting_usdt: float = 10_000.0
     # Auto paper: fill when edge + inventory clear (paper only)
     auto_paper_enabled: bool = True
-    auto_paper_notional_usdt: float = 400.0
+    # Size = min(max, buy_venue_usdt * pct); skip below min
+    auto_paper_notional_pct: float = 0.03
+    auto_paper_notional_max_usdt: float = 500.0
+    auto_paper_notional_min_usdt: float = 10.0
+    # Legacy alias — treated as max cap if max unset in older .env
+    auto_paper_notional_usdt: float = 500.0
     # None → use min_net_edge_pct; set higher to be pickier than the board
     auto_paper_min_net_edge_pct: float | None = None
     auto_paper_cooldown_seconds: float = 12.0

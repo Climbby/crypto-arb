@@ -37,16 +37,23 @@ def _cross_opp(edge: float = 1.0) -> Opportunity:
     )
 
 
-@pytest.mark.asyncio
-async def test_auto_fills_when_enabled(broker: PaperBroker):
-    auto = AutoPaperTrader(
-        broker,
+def _auto(**kwargs) -> AutoPaperTrader:
+    """Helper: pct=100% of venue with a low max ≈ fixed-size tests."""
+    defaults = dict(
         enabled=True,
-        notional_usdt=5.0,
-        min_net_edge_pct=0.1,
+        notional_pct=1.0,
+        notional_max_usdt=5.0,
+        notional_min_usdt=1.0,
         cooldown_seconds=60.0,
         max_per_scan=1,
     )
+    defaults.update(kwargs)
+    return AutoPaperTrader(**defaults)
+
+
+@pytest.mark.asyncio
+async def test_auto_fills_when_enabled(broker: PaperBroker):
+    auto = _auto(broker=broker, min_net_edge_pct=0.1)
     opp = _cross_opp(0.5)
     opp.max_notional_usdt = 5.0
     before = (await broker.portfolio())["realized_pnl_usdt"]
@@ -65,8 +72,41 @@ async def test_auto_fills_when_enabled(broker: PaperBroker):
 
 
 @pytest.mark.asyncio
+async def test_size_is_pct_of_buy_venue_usdt(broker: PaperBroker):
+    auto = AutoPaperTrader(
+        broker,
+        enabled=True,
+        notional_pct=0.03,
+        notional_max_usdt=500.0,
+        notional_min_usdt=1.0,
+        min_net_edge_pct=0.0,
+        cooldown_seconds=0.0,
+        max_per_scan=1,
+    )
+    portfolio = await broker.portfolio()
+    buy_usdt = portfolio["by_venue"]["binance"]["USDT"]  # 5000 → 3% = 150
+    # Seed BTC on sell venue only supports ~5 USDT notional at buy_price=100
+    opp = _cross_opp()
+    opp.max_notional_usdt = 10_000.0
+    assert auto.size_for_opportunity(opp, portfolio["by_venue"]) == pytest.approx(
+        min(500.0, buy_usdt * 0.03)
+    )
+    # Cap to inventory so the fill can actually execute
+    opp.max_notional_usdt = 5.0
+    fills = await auto.maybe_execute(
+        [opp],
+        fee_map={"binance": 0.0, "kraken": 0.0},
+        slippage_bps=0.0,
+        scanner_min_edge=0.0,
+        ticks=[],
+    )
+    assert len(fills) == 1
+    assert fills[0]["notional_usdt"] == pytest.approx(5.0)
+
+
+@pytest.mark.asyncio
 async def test_auto_respects_disabled(broker: PaperBroker):
-    auto = AutoPaperTrader(broker, enabled=False, notional_usdt=5.0)
+    auto = _auto(broker=broker, enabled=False)
     fills = await auto.maybe_execute(
         [_cross_opp()],
         fee_map={"binance": 0.0, "kraken": 0.0},
@@ -79,14 +119,7 @@ async def test_auto_respects_disabled(broker: PaperBroker):
 
 @pytest.mark.asyncio
 async def test_auto_cooldown(broker: PaperBroker):
-    auto = AutoPaperTrader(
-        broker,
-        enabled=True,
-        notional_usdt=5.0,
-        cooldown_seconds=999.0,
-        max_per_scan=1,
-        min_net_edge_pct=0.0,
-    )
+    auto = _auto(broker=broker, cooldown_seconds=999.0, min_net_edge_pct=0.0)
     opp = _cross_opp()
     opp.max_notional_usdt = 5.0
     kwargs = dict(
@@ -103,7 +136,7 @@ async def test_auto_cooldown(broker: PaperBroker):
 
 @pytest.mark.asyncio
 async def test_auto_skips_non_executable(broker: PaperBroker):
-    auto = AutoPaperTrader(broker, enabled=True, notional_usdt=50.0, min_net_edge_pct=0.0)
+    auto = _auto(broker=broker, notional_max_usdt=50.0, min_net_edge_pct=0.0)
     opp = _cross_opp()
     opp.executable = False
     fills = await auto.maybe_execute(
@@ -121,7 +154,9 @@ async def test_auto_triangular(broker: PaperBroker):
     auto = AutoPaperTrader(
         broker,
         enabled=True,
-        notional_usdt=100.0,
+        notional_pct=1.0,
+        notional_max_usdt=100.0,
+        notional_min_usdt=1.0,
         min_net_edge_pct=0.0,
         cooldown_seconds=0.0,
     )

@@ -58,6 +58,9 @@ class SettingsUpdate(BaseModel):
     watched_symbols: list[str] | None = None
     paper_starting_usdt: float | None = None
     auto_paper_enabled: bool | None = None
+    auto_paper_notional_pct: float | None = Field(default=None, gt=0, le=1)
+    auto_paper_notional_max_usdt: float | None = Field(default=None, gt=0)
+    auto_paper_notional_min_usdt: float | None = Field(default=None, gt=0)
     auto_paper_notional_usdt: float | None = Field(default=None, gt=0)
     auto_paper_min_net_edge_pct: float | None = None
     auto_paper_cooldown_seconds: float | None = Field(default=None, ge=0)
@@ -114,7 +117,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     auto = AutoPaperTrader(
         broker,
         enabled=settings.auto_paper_enabled,
-        notional_usdt=settings.auto_paper_notional_usdt,
+        notional_pct=settings.auto_paper_notional_pct,
+        notional_max_usdt=settings.auto_paper_notional_max_usdt
+        or settings.auto_paper_notional_usdt,
+        notional_min_usdt=settings.auto_paper_notional_min_usdt,
         min_net_edge_pct=settings.auto_paper_min_net_edge_pct,
         cooldown_seconds=settings.auto_paper_cooldown_seconds,
         max_per_scan=settings.auto_paper_max_per_scan,
@@ -123,7 +129,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     rebalancer = AutoRebalancer(
         broker,
         enabled=settings.auto_rebalance_enabled,
-        notional_usdt=settings.auto_paper_notional_usdt,
+        notional_usdt=settings.auto_paper_notional_max_usdt
+        or settings.auto_paper_notional_usdt,
         cooldown_seconds=settings.auto_rebalance_cooldown_seconds,
         usdt_chunk=settings.auto_rebalance_usdt_chunk,
         max_transfers_per_scan=4,
@@ -360,7 +367,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "enable_triangular": s.enable_triangular,
             "feed_modes": state["feed_modes"],
             "auto_paper_enabled": auto.enabled,
-            "auto_paper_notional_usdt": auto.notional_usdt,
+            "auto_paper_notional_pct": auto.notional_pct,
+            "auto_paper_notional_max_usdt": auto.notional_max_usdt,
+            "auto_paper_notional_min_usdt": auto.notional_min_usdt,
+            "auto_paper_notional_usdt": auto.notional_max_usdt,
             "auto_paper_min_net_edge_pct": auto.min_net_edge_pct,
             "auto_paper_cooldown_seconds": auto.cooldown_seconds,
             "auto_paper_max_per_scan": auto.max_per_scan,
@@ -396,9 +406,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             broker.starting_usdt = body.paper_starting_usdt
         if body.auto_paper_enabled is not None:
             auto.enabled = body.auto_paper_enabled
-        if body.auto_paper_notional_usdt is not None:
-            auto.notional_usdt = body.auto_paper_notional_usdt
+        if body.auto_paper_notional_pct is not None:
+            auto.notional_pct = body.auto_paper_notional_pct
+        if body.auto_paper_notional_max_usdt is not None:
+            auto.notional_max_usdt = body.auto_paper_notional_max_usdt
+            rebalancer.notional_usdt = body.auto_paper_notional_max_usdt
+        elif body.auto_paper_notional_usdt is not None:
+            auto.notional_max_usdt = body.auto_paper_notional_usdt
             rebalancer.notional_usdt = body.auto_paper_notional_usdt
+        if body.auto_paper_notional_min_usdt is not None:
+            auto.notional_min_usdt = body.auto_paper_notional_min_usdt
         if "auto_paper_min_net_edge_pct" in body.model_fields_set:
             auto.min_net_edge_pct = body.auto_paper_min_net_edge_pct
         if body.auto_paper_cooldown_seconds is not None:
@@ -422,7 +439,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "watched_symbols": state["symbols"],
                 "paper_starting_usdt": broker.starting_usdt,
                 "auto_paper_enabled": auto.enabled,
-                "auto_paper_notional_usdt": auto.notional_usdt,
+                "auto_paper_notional_pct": auto.notional_pct,
+                "auto_paper_notional_max_usdt": auto.notional_max_usdt,
+                "auto_paper_notional_min_usdt": auto.notional_min_usdt,
+                "auto_paper_notional_usdt": auto.notional_max_usdt,
                 "auto_paper_min_net_edge_pct": auto.min_net_edge_pct,
                 "auto_paper_cooldown_seconds": auto.cooldown_seconds,
                 "auto_paper_max_per_scan": auto.max_per_scan,

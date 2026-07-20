@@ -15,7 +15,9 @@ export function SettingsPanel({ onSaved }: Props) {
   const [symbols, setSymbols] = useState('BTC/USDT,ETH/USDT,SOL/USDT')
   const [starting, setStarting] = useState(10000)
   const [autoEnabled, setAutoEnabled] = useState(true)
-  const [autoNotional, setAutoNotional] = useState(400)
+  const [autoPct, setAutoPct] = useState(3)
+  const [autoMax, setAutoMax] = useState(500)
+  const [autoMin, setAutoMin] = useState(10)
   const [autoMinEdge, setAutoMinEdge] = useState('')
   const [autoCooldown, setAutoCooldown] = useState(12)
   const [autoMaxScan, setAutoMaxScan] = useState(3)
@@ -37,7 +39,12 @@ export function SettingsPanel({ onSaved }: Props) {
       setSymbols(s.watched_symbols.join(','))
       setStarting(s.paper_starting_usdt)
       setAutoEnabled(s.auto_paper_enabled ?? true)
-      setAutoNotional(s.auto_paper_notional_usdt ?? 400)
+      setAutoPct(
+        Math.round(((s.auto_paper_notional_pct ?? s.auto_paper?.notional_pct ?? 0.03) * 1000)) /
+          10,
+      )
+      setAutoMax(s.auto_paper_notional_max_usdt ?? s.auto_paper_notional_usdt ?? 500)
+      setAutoMin(s.auto_paper_notional_min_usdt ?? 10)
       setAutoMinEdge(
         s.auto_paper_min_net_edge_pct == null ? '' : String(s.auto_paper_min_net_edge_pct),
       )
@@ -66,7 +73,9 @@ export function SettingsPanel({ onSaved }: Props) {
           .filter(Boolean),
         paper_starting_usdt: starting,
         auto_paper_enabled: autoEnabled,
-        auto_paper_notional_usdt: autoNotional,
+        auto_paper_notional_pct: autoPct / 100,
+        auto_paper_notional_max_usdt: autoMax,
+        auto_paper_notional_min_usdt: autoMin,
         auto_paper_min_net_edge_pct: autoMinEdge.trim() === '' ? null : Number(autoMinEdge),
         auto_paper_cooldown_seconds: autoCooldown,
         auto_paper_max_per_scan: autoMaxScan,
@@ -173,8 +182,8 @@ export function SettingsPanel({ onSaved }: Props) {
 
       <h3 className="mt-6 text-base font-medium">Auto paper</h3>
       <p className="mt-1 text-xs text-[var(--muted)]">
-        Fills the best executable edge each scan (paper only). Cooldown stops the same id from
-        firing every tick.
+        Fills the best executable edge each scan (paper only). Size is a % of USDT on the buy
+        venue, capped. Cooldown stops the same route from firing every tick.
       </p>
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <label className="flex items-center gap-2 text-sm sm:col-span-2">
@@ -186,12 +195,34 @@ export function SettingsPanel({ onSaved }: Props) {
           <span>Enable auto paper trading</span>
         </label>
         <label className="block text-sm">
-          <span className="text-[var(--muted)]">Notional USDT per fill</span>
+          <span className="text-[var(--muted)]">% of buy-venue USDT per fill</span>
+          <input
+            type="number"
+            step="0.5"
+            min="0.1"
+            max="100"
+            value={autoPct}
+            onChange={(e) => setAutoPct(Number(e.target.value))}
+            className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5"
+          />
+        </label>
+        <label className="block text-sm">
+          <span className="text-[var(--muted)]">Max USDT per fill</span>
           <input
             type="number"
             step="10"
-            value={autoNotional}
-            onChange={(e) => setAutoNotional(Number(e.target.value))}
+            value={autoMax}
+            onChange={(e) => setAutoMax(Number(e.target.value))}
+            className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5"
+          />
+        </label>
+        <label className="block text-sm">
+          <span className="text-[var(--muted)]">Min USDT per fill</span>
+          <input
+            type="number"
+            step="1"
+            value={autoMin}
+            onChange={(e) => setAutoMin(Number(e.target.value))}
             className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5"
           />
         </label>
