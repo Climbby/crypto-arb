@@ -492,7 +492,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         current_by = mark_equity_by_venue(by_venue, ticks)
         cutoff = (utcnow() - timedelta(hours=24)).isoformat()
         past_by = await db.equity_by_venue_at_or_before(cutoff)
-        past = await db.equity_snapshot_at_or_before(cutoff)
         venues: dict[str, dict[str, Any]] = {}
         for venue, eq in current_by.items():
             daily_pct: float | None = None
@@ -506,6 +505,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             }
         realized_now = float(portfolio.get("realized_pnl_usdt") or 0)
         last_24h: dict[str, Any] | None = None
+        past = await db.equity_snapshot_at_or_before(cutoff)
+        if past is None:
+            # Book younger than 24h — measure from the earliest snapshot we have
+            past = await db.earliest_equity_snapshot()
         if past is not None:
             pnl_delta = realized_now - float(past["realized_pnl_usdt"] or 0)
             eq_base = float(past["equity_usdt"] or 0)

@@ -577,6 +577,19 @@ class Database:
         row = await cur.fetchone()
         return dict(row) if row else None
 
+    async def earliest_equity_snapshot(self) -> dict[str, Any] | None:
+        cur = await self.conn.execute(
+            """
+            SELECT equity_usdt, realized_pnl_usdt, usdt_total, recorded_at
+            FROM paper_equity
+            WHERE COALESCE(note, '') NOT LIKE 'backfill%'
+            ORDER BY recorded_at ASC, id ASC
+            LIMIT 1
+            """
+        )
+        row = await cur.fetchone()
+        return dict(row) if row else None
+
     async def list_equity(
         self, limit: int = 500, hours: float | None = None
     ) -> list[dict[str, Any]]:
