@@ -435,6 +435,14 @@ class Database:
     async def list_equity(
         self, limit: int = 500, hours: float | None = None
     ) -> list[dict[str, Any]]:
+        """
+        Return chronological equity points for charts.
+
+        Important: do not `ORDER BY … DESC LIMIT n` inside a time window — that
+        returns only the newest n points (e.g. ~2h of dense heartbeats) even when
+        the window is 6h/24h. Instead load the window (or all), then downsample
+        evenly to at most `limit` points spanning the full range.
+        """
         if hours is not None and hours > 0:
             from datetime import timedelta
 
@@ -444,24 +452,40 @@ class Database:
                 SELECT * FROM paper_equity
                 WHERE recorded_at >= ?
                   AND COALESCE(note, '') NOT LIKE 'backfill%'
-                ORDER BY recorded_at DESC, id DESC
-                LIMIT ?
+                ORDER BY recorded_at ASC, id ASC
                 """,
-                (cutoff, limit),
+                (cutoff,),
             )
         else:
             cur = await self.conn.execute(
                 """
                 SELECT * FROM paper_equity
                 WHERE COALESCE(note, '') NOT LIKE 'backfill%'
-                ORDER BY recorded_at DESC, id DESC
-                LIMIT ?
-                """,
-                (limit,),
+                ORDER BY recorded_at ASC, id ASC
+                """
             )
-        rows = await cur.fetchall()
-        # chronological for charts
-        return list(reversed([dict(r) for r in rows]))
+        rows = [dict(r) for r in await cur.fetchall()]
+        return self._downsample_rows(rows, max(10, limit))
+
+    @staticmethod
+    def _downsample_rows(
+        rows: list[dict[str, Any]], limit: int
+    ) -> list[dict[str, Any]]:
+        n = len(rows)
+        if n <= limit:
+            return rows
+        # Evenly spaced indices across the full window, always include first+last
+        out: list[dict[str, Any]] = []
+        last_idx = -1
+        for i in range(limit):
+            idx = round(i * (n - 1) / (limit - 1)) if limit > 1 else 0
+            if idx == last_idx:
+                continue
+            out.append(rows[idx])
+            last_idx = idx
+        if out and out[-1] is not rows[-1]:
+            out.append(rows[-1])
+        return out
 
     async def earliest_equity_at(self) -> str | None:
         cur = await self.conn.execute(

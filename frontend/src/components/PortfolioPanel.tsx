@@ -35,8 +35,8 @@ export function PortfolioPanel({ portfolio, onChange: _onChange, refreshKey = 0 
   const [chartTab, setChartTab] = useState<ChartTab>('equity')
 
   useEffect(() => {
-    const limit =
-      hours == null ? 5000 : hours >= 168 ? 4000 : hours >= 24 ? 3000 : 2000
+    // Point budget for the chart — backend downsamples evenly across the window
+    const limit = 800
     void api
       .getEquity(limit, hours)
       .then((r) => {
