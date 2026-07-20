@@ -58,7 +58,7 @@ class PaperBroker:
         balances = await self.db.get_balances()
         trades = await self.db.list_trades(limit=100)
         transfers = await self.db.list_transfers(limit=50)
-        realized_pnl = sum(float(t["pnl_usdt"]) for t in trades)
+        realized_pnl = await self.db.sum_trade_pnl_usdt()
         by_venue: dict[str, dict[str, float]] = {}
         for row in balances:
             by_venue.setdefault(row["venue"], {})[row["asset"]] = float(row["amount"])

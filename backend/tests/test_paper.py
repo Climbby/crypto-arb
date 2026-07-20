@@ -48,6 +48,31 @@ async def test_execute_and_pnl(broker: PaperBroker):
     assert trade["quantity"] == pytest.approx(0.05)
     assert trade["pnl_usdt"] > 0
     assert len(result["portfolio"]["trades"]) == 1
+    assert result["portfolio"]["realized_pnl_usdt"] == pytest.approx(trade["pnl_usdt"])
+
+
+@pytest.mark.asyncio
+async def test_realized_pnl_is_lifetime(broker: PaperBroker):
+    """Realized PnL must sum all trades, not only the last-100 list window."""
+    for i in range(105):
+        await broker.db.insert_trade(
+            opp_id=f"t-{i}",
+            symbol="BTC/USDT",
+            buy_exchange="binance",
+            sell_exchange="kraken",
+            quantity=0.01,
+            buy_price=100.0,
+            sell_price=101.0,
+            net_edge_pct=0.5,
+            pnl_usdt=1.0 if i < 5 else 0.01,
+        )
+    portfolio = await broker.portfolio()
+    assert len(portfolio["trades"]) == 100
+    # 5 * 1.0 + 100 * 0.01 = 6.0 — lifetime includes the 5 large early trades
+    assert portfolio["realized_pnl_usdt"] == pytest.approx(6.0)
+    # Last-100 window alone would be 100 * 0.01 = 1.0
+    window = sum(float(t["pnl_usdt"]) for t in portfolio["trades"])
+    assert window == pytest.approx(1.0)
 
 
 @pytest.mark.asyncio

@@ -241,21 +241,25 @@ class Database:
             (start_iso, end_iso),
         )
         row = await cur.fetchone()
-        trades = await self.list_trades(limit=500)
-        week_trades = [
-            t
-            for t in trades
-            if start_iso <= str(t.get("executed_at", "")) < end_iso
-        ]
-        pnl = sum(float(t["pnl_usdt"]) for t in week_trades)
+        cur = await self.conn.execute(
+            """
+            SELECT
+              COUNT(*) AS count,
+              COALESCE(SUM(pnl_usdt), 0) AS pnl
+            FROM paper_trades
+            WHERE executed_at >= ? AND executed_at < ?
+            """,
+            (start_iso, end_iso),
+        )
+        trade_row = await cur.fetchone()
         return {
             "start": start_iso,
             "end": end_iso,
             "opportunity_count": int(row["count"]) if row else 0,
             "avg_net_edge_pct": float(row["avg_net"]) if row else 0.0,
             "max_net_edge_pct": float(row["max_net"]) if row else 0.0,
-            "paper_trades": len(week_trades),
-            "paper_pnl_usdt": pnl,
+            "paper_trades": int(trade_row["count"]) if trade_row else 0,
+            "paper_pnl_usdt": float(trade_row["pnl"]) if trade_row else 0.0,
         }
 
 
@@ -335,6 +339,13 @@ class Database:
         )
         rows = await cur.fetchall()
         return [dict(r) for r in rows]
+
+    async def sum_trade_pnl_usdt(self) -> float:
+        cur = await self.conn.execute(
+            "SELECT COALESCE(SUM(pnl_usdt), 0) AS total FROM paper_trades"
+        )
+        row = await cur.fetchone()
+        return float(row["total"]) if row else 0.0
 
     async def clear_trades(self) -> None:
         await self.conn.execute("DELETE FROM paper_trades")
