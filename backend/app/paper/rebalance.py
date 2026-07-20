@@ -26,7 +26,7 @@ class AutoRebalancer:
         broker: PaperBroker,
         *,
         enabled: bool = True,
-        notional_usdt: float = 100.0,
+        notional_usdt: float = 400.0,
         cooldown_seconds: float = 20.0,
         max_transfers_per_scan: int = 4,
         usdt_chunk: float = 500.0,

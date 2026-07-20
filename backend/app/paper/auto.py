@@ -28,7 +28,7 @@ class AutoPaperTrader:
         broker: PaperBroker,
         *,
         enabled: bool = True,
-        notional_usdt: float = 100.0,
+        notional_usdt: float = 400.0,
         min_net_edge_pct: float | None = None,
         cooldown_seconds: float = 12.0,
         max_per_scan: int = 3,

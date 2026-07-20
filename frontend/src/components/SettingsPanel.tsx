@@ -37,7 +37,7 @@ export function SettingsPanel({ onSaved }: Props) {
       setSymbols(s.watched_symbols.join(','))
       setStarting(s.paper_starting_usdt)
       setAutoEnabled(s.auto_paper_enabled ?? true)
-      setAutoNotional(s.auto_paper_notional_usdt ?? 100)
+      setAutoNotional(s.auto_paper_notional_usdt ?? 400)
       setAutoMinEdge(
         s.auto_paper_min_net_edge_pct == null ? '' : String(s.auto_paper_min_net_edge_pct),
       )

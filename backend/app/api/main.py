@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 class ExecuteRequest(BaseModel):
     opportunity_id: str
-    notional_usdt: float = Field(default=100.0, gt=0)
+    notional_usdt: float = Field(default=400.0, gt=0)
 
 
 class TransferRequest(BaseModel):
