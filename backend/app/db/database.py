@@ -199,15 +199,25 @@ class Database:
         buckets = [dict(r) for r in await cur2.fetchall()]
         cur3 = await self.conn.execute(
             """
-            SELECT symbol, buy_exchange, sell_exchange, net_edge_pct, recorded_at
+            SELECT
+              symbol,
+              buy_exchange,
+              sell_exchange,
+              ROUND(net_edge_pct, 3) AS net_edge_pct,
+              MAX(recorded_at) AS recorded_at,
+              COUNT(*) AS count
             FROM opportunity_snapshots
             WHERE recorded_at >= ?
+            GROUP BY symbol, buy_exchange, sell_exchange, ROUND(net_edge_pct, 3)
             ORDER BY net_edge_pct DESC
-            LIMIT 80
+            LIMIT 40
             """,
             (cutoff,),
         )
         top = [dict(r) for r in await cur3.fetchall()]
+        for item in top:
+            item["net_edge_pct"] = float(item["net_edge_pct"] or 0)
+            item["count"] = int(item["count"] or 1)
         return {
             "hours": hours,
             "count": int(row["count"]) if row else 0,

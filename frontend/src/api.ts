@@ -42,6 +42,7 @@ export type Stats = {
     sell_exchange: string
     net_edge_pct: number
     recorded_at: string
+    count?: number
   }[]
 }
 

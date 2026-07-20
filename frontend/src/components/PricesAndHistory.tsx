@@ -25,21 +25,35 @@ type TopEdgeRow = {
   count: number
 }
 
-function groupTopEdges(
-  top: { symbol: string; buy_exchange: string; sell_exchange: string; net_edge_pct: number; recorded_at: string }[],
+function normalizeTopEdges(
+  top: {
+    symbol: string
+    buy_exchange: string
+    sell_exchange: string
+    net_edge_pct: number
+    recorded_at: string
+    count?: number
+  }[],
 ): TopEdgeRow[] {
+  // Backend already groups by route + net% (3dp). Merge any remaining exact dupes.
   const map = new Map<string, TopEdgeRow>()
   for (const h of top) {
-    // Only collapse exact duplicates: same route AND same displayed net %
-    const netKey = h.net_edge_pct.toFixed(3)
+    const netKey = Number(h.net_edge_pct).toFixed(3)
     const key = `${h.symbol}|${h.buy_exchange}|${h.sell_exchange}|${netKey}`
+    const count = Math.max(1, Number(h.count) || 1)
     const existing = map.get(key)
     if (!existing) {
-      map.set(key, { ...h, count: 1 })
+      map.set(key, {
+        symbol: h.symbol,
+        buy_exchange: h.buy_exchange,
+        sell_exchange: h.sell_exchange,
+        net_edge_pct: Number(h.net_edge_pct),
+        recorded_at: h.recorded_at,
+        count,
+      })
       continue
     }
-    existing.count += 1
-    // Keep the most recent timestamp for the group
+    existing.count += count
     if (h.recorded_at > existing.recorded_at) {
       existing.recorded_at = h.recorded_at
     }
@@ -70,7 +84,7 @@ export function PricesAndHistory({ prices, refreshKey }: Props) {
     })
   }, [stats])
 
-  const topGrouped = useMemo(() => groupTopEdges(stats?.top ?? []), [stats])
+  const topGrouped = useMemo(() => normalizeTopEdges(stats?.top ?? []), [stats])
 
   const bySymbol = useMemo(() => {
     const map: Record<string, Tick[]> = {}
@@ -216,7 +230,7 @@ export function PricesAndHistory({ prices, refreshKey }: Props) {
               <tbody>
                 {topGrouped.map((h) => (
                   <tr
-                    key={`${h.symbol}-${h.buy_exchange}-${h.sell_exchange}`}
+                    key={`${h.symbol}-${h.buy_exchange}-${h.sell_exchange}-${h.net_edge_pct.toFixed(3)}`}
                     className="border-t border-[var(--border)]/50"
                   >
                     <td className="py-1.5 text-[var(--muted)]">
