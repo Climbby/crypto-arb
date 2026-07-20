@@ -40,6 +40,7 @@ export function PortfolioPanel({ portfolio, onChange: _onChange, refreshKey = 0 
   } | null>(null)
   const [hours, setHours] = useState<number | null>(null)
   const [chartTab, setChartTab] = useState<ChartTab>('equity')
+  const [changelogOpen, setChangelogOpen] = useState(false)
 
   useEffect(() => {
     // Point budget for the chart — backend downsamples evenly across the window
@@ -145,7 +146,57 @@ export function PortfolioPanel({ portfolio, onChange: _onChange, refreshKey = 0 
   return (
     <section className="rounded-lg border border-[var(--border)] bg-[var(--bg-panel)]/80 p-4">
       <div className="mb-3">
-        <h2 className="m-0 text-lg font-medium">Paper portfolio</h2>
+        <div className="flex items-center gap-2">
+          <h2 className="m-0 text-lg font-medium">Paper portfolio</h2>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setChangelogOpen((o) => !o)}
+              className="inline-flex h-7 w-7 items-center justify-center rounded border border-[var(--border)] bg-[var(--bg)] text-[var(--muted)] hover:border-[var(--warn)]/50 hover:text-[var(--warn)]"
+              title="Paper trading changelog"
+              aria-label="Paper trading changelog"
+              aria-expanded={changelogOpen}
+            >
+              <svg
+                aria-hidden
+                viewBox="0 0 24 24"
+                className="h-3.5 w-3.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.75"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M8 6h11M8 12h11M8 18h11" />
+                <path d="M4 6h.01M4 12h.01M4 18h.01" />
+              </svg>
+            </button>
+            {changelogOpen ? (
+              <div
+                className="absolute left-0 top-full z-20 mt-1.5 w-[min(22rem,calc(100vw-2.5rem))] rounded border border-[var(--border)] bg-[var(--bg-panel)] p-3 text-[11px] leading-snug text-[var(--text)] shadow-lg"
+                role="dialog"
+                aria-label="Paper trading changelog"
+              >
+                <p className="m-0 font-medium text-[var(--warn)]">
+                  Stricter paper realism · {realismSinceLabel}
+                </p>
+                <p className="m-0 mt-1.5 text-[var(--muted)]">
+                  Before that, transfers were instant and fills ignored slippage — earlier PnL is
+                  optimistic. After: withdraw delays (USDT~3m → BTC~30m), burn fees in transit, and
+                  fill slippage. Still paper (no depth/latency). Lifetime totals mix both regimes.
+                  Chart marker shows the cutover.
+                </p>
+                <button
+                  type="button"
+                  className="mt-2 text-[10px] text-[var(--muted)] hover:text-[var(--text)]"
+                  onClick={() => setChangelogOpen(false)}
+                >
+                  Close
+                </button>
+              </div>
+            ) : null}
+          </div>
+        </div>
         <p className="m-0 mt-1 text-xs text-[var(--muted)]">
           Marked equity:{' '}
           <span className="text-[var(--accent)] tabular-nums">
@@ -177,15 +228,6 @@ export function PortfolioPanel({ portfolio, onChange: _onChange, refreshKey = 0 
               </span>
             </>
           ) : null}
-        </p>
-        <p className="m-0 mt-2 rounded border border-[var(--warn)]/35 bg-[var(--warn)]/10 px-2.5 py-1.5 text-[11px] leading-snug text-[var(--text)]">
-          <span className="font-medium text-[var(--warn)]">Stricter paper realism</span>
-          {' since '}
-          {realismSinceLabel}
-          {'. '}
-          Before that, transfers were instant and fills ignored slippage — earlier PnL is
-          optimistic. After: withdraw delays (USDT~3m → BTC~30m), burn fees in transit, and
-          fill slippage. Still paper (no depth/latency). Lifetime totals mix both regimes.
         </p>
       </div>
 
